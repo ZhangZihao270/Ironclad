@@ -7,9 +7,10 @@ import opened Environment_s
 
 class HostEnvironment
 {
+  ghost var constants:HostConstants;
   ghost var ok:OkState;
   ghost var now:NowState;
-  ghost var net:NetState;
+  ghost var udp:UdpState;
   ghost var files:FileSystemState;
 
   constructor{:axiom} () requires false
@@ -22,6 +23,28 @@ class HostEnvironment
 }
 
 //////////////////////////////////////////////////////////////////////////////
+// Per-host constants
+//////////////////////////////////////////////////////////////////////////////
+
+class HostConstants
+{
+  constructor{:axiom} () requires false
+
+  function{:axiom} LocalAddress():seq<byte> reads this // REVIEW: Do we need this anymore?  We now allow different UdpClients to have different addresses anyway.
+  function{:axiom} CommandLineArgs():seq<seq<uint16>> reads this // result of C# System.Environment.GetCommandLineArgs(); argument 0 is name of executable
+
+  static method{:axiom} NumCommandLineArgs(ghost env:HostEnvironment) returns(n:uint32)
+    requires env.Valid()
+    ensures  n as int == |env.constants.CommandLineArgs()|
+
+  static method{:axiom} GetCommandLineArg(i:uint64, ghost env:HostEnvironment) returns(arg:array<uint16>)
+    requires env.Valid()
+    requires 0 <= i as int < |env.constants.CommandLineArgs()|
+    ensures  fresh(arg)
+    ensures  arg[..] == env.constants.CommandLineArgs()[i]
+}
+
+//////////////////////////////////////////////////////////////////////////////
 // Failure
 //////////////////////////////////////////////////////////////////////////////
 
@@ -30,17 +53,6 @@ class OkState
 {
   constructor{:axiom} () requires false
   function{:axiom} ok():bool reads this
-}
-
-//////////////////////////////////////////////////////////////////////////////
-// Print parameters
-//////////////////////////////////////////////////////////////////////////////
-
-class PrintParams
-{
-  constructor{:axiom} () requires false
-  static function method{:axiom} ShouldPrintProfilingInfo() : bool
-  static function method{:axiom} ShouldPrintProgress() : bool
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -64,57 +76,73 @@ class Time
   static method{:axiom} GetTime(ghost env:HostEnvironment) returns(t:uint64)
     requires env.Valid()
     modifies env.now // To avoid contradiction, GetTime must advance time, because successive calls to GetTime can return different values
-    modifies env.net
+    modifies env.udp
     ensures  t as int == env.now.now()
     ensures  AdvanceTime(old(env.now.now()), env.now.now(), 0)
-    ensures  env.net.history() == old(env.net.history()) + [LIoOpReadClock(t as int)]
+    ensures  env.udp.history() == old(env.udp.history()) + [LIoOpReadClock(t as int)]
 
-  // Used for performance debugging
-  static method{:axiom} GetDebugTimeTicks() returns(t:uint64)
-  static method{:axiom} RecordTiming(name:array<char>, time:uint64)
+    // Used for performance debugging
+    static method{:axiom} GetDebugTimeTicks() returns(t:uint64)
+    static method{:axiom} RecordTiming(name:array<char>, time:uint64)
 }
 
 //////////////////////////////////////////////////////////////////////////////
 // Networking
 //////////////////////////////////////////////////////////////////////////////
 
-datatype EndPoint = EndPoint(public_key:seq<byte>)
-    // NetPacket_ctor has silly name to ferret out backwards calls
-type NetPacket = LPacket<EndPoint, seq<byte>>
-type NetEvent = LIoOp<EndPoint, seq<byte>>
+datatype EndPoint = EndPoint(addr:seq<byte>, port:uint16)
+    // UdpPacket_ctor has silly name to ferret out backwards calls
+type UdpPacket = LPacket<EndPoint, seq<byte>>
+type UdpEvent = LIoOp<EndPoint, seq<byte>>
+
+class UdpState
+{
+  constructor{:axiom} () requires false
+  function{:axiom} history():seq<UdpEvent> reads this
+}
+
+class IPEndPoint
+{
+  ghost var env:HostEnvironment
+  function{:axiom} Address():seq<byte> reads this
+  function{:axiom} Port():uint16 reads this
+  function EP():EndPoint reads this { EndPoint(Address(), Port()) }
+  constructor{:axiom} () requires false
+
+  method{:axiom} GetAddress() returns(addr:array<byte>)
+    ensures  fresh(addr)
+    ensures  addr[..] == Address()
+    ensures  addr.Length == 4      // Encoding current IPv4 assumption
+
+  function method{:axiom} GetPort():uint16 reads this
+    ensures  GetPort() == Port()
+
+  static method{:axiom} Construct(ipAddress:array<byte>, port:uint16, ghost env:HostEnvironment) returns(ok:bool, ep:IPEndPoint)
+    requires env.Valid()
+    modifies env.ok
+    ensures  env.ok.ok() == ok
+    ensures  ok ==> fresh(ep) && ep.env == env && ep.Address() == ipAddress[..] && ep.Port() == port
+}
 
 function MaxPacketSize() : int { 0xFFFF_FFFF_FFFF_FFFF }
 
-predicate ValidPhysicalAddress(endPoint:EndPoint)
-{
-  |endPoint.public_key| < 0x10_0000 // < 1 MB
-}
-    
-predicate ValidPhysicalPacket(p:LPacket<EndPoint, seq<byte>>)
-{
-  && ValidPhysicalAddress(p.src)
-  && ValidPhysicalAddress(p.dst)
-  && |p.msg| <= MaxPacketSize()
-}
-  
-predicate ValidPhysicalIo(io:LIoOp<EndPoint, seq<byte>>)
-{
-  && (io.LIoOpReceive? ==> ValidPhysicalPacket(io.r))
-  && (io.LIoOpSend? ==> ValidPhysicalPacket(io.s))
-}
-
-class NetState
-{
-  constructor{:axiom} () requires false
-  function{:axiom} history():seq<NetEvent> reads this
-}
-
-class NetClient
+class UdpClient
 {
   ghost var env:HostEnvironment
-  function method{:axiom} MyPublicKey():seq<byte> reads this
+  function{:axiom} LocalEndPoint():EndPoint reads this
   function{:axiom} IsOpen():bool reads this
   constructor{:axiom} () requires false
+
+  static method{:axiom} Construct(localEP:IPEndPoint, ghost env:HostEnvironment)
+    returns(ok:bool, udp:UdpClient?)
+    requires env.Valid()
+    requires env.ok.ok()
+    modifies env.ok
+    ensures  env.ok.ok() == ok
+    ensures  ok ==> && fresh(udp)
+                    && udp.env == env
+                    && udp.IsOpen()
+                    && udp.LocalEndPoint() == localEP.EP()
 
   method{:axiom} Close() returns(ok:bool)
     requires env.Valid()
@@ -125,7 +153,7 @@ class NetClient
     ensures  env == old(env)
     ensures  env.ok.ok() == ok
 
-  method{:axiom} Receive(timeLimit:int32) returns(ok:bool, timedOut:bool, remote:seq<byte>, buffer:array<byte>)
+  method{:axiom} Receive(timeLimit:int32) returns(ok:bool, timedOut:bool, remote:IPEndPoint, buffer:array<byte>)
     requires env.Valid()
     requires env.ok.ok()
     requires IsOpen()
@@ -134,33 +162,33 @@ class NetClient
     modifies this
     modifies env.ok
     modifies env.now
-    modifies env.net
+    modifies env.udp
     ensures  env == old(env)
     ensures  env.ok.ok() == ok
     ensures  AdvanceTime(old(env.now.now()), env.now.now(), timeLimit as int)
-    ensures  MyPublicKey() == old(MyPublicKey())
+    ensures  LocalEndPoint() == old(LocalEndPoint())
     ensures  ok ==> IsOpen()
-    ensures  ok ==> timedOut  ==> env.net.history() == old(env.net.history()) + [LIoOpTimeoutReceive()]
+    ensures  ok ==> timedOut  ==> env.udp.history() == old(env.udp.history()) + [LIoOpTimeoutReceive()]
     ensures  ok ==> !timedOut ==>
+               && fresh(remote)
                && fresh(buffer)
-               && env.net.history() == old(env.net.history()) +
-                   [LIoOpReceive(LPacket(EndPoint(MyPublicKey()), EndPoint(remote), buffer[..]))]
-               && ValidPhysicalAddress(EndPoint(remote))
-               && buffer.Length <= MaxPacketSize()
+               && env.udp.history() == old(env.udp.history()) +
+                   [LIoOpReceive(LPacket(LocalEndPoint(), remote.EP(), buffer[..]))]
+               && buffer.Length < 0x1_0000_0000_0000_0000;
 
-  method{:axiom} Send(remote:seq<byte>, buffer:array<byte>) returns(ok:bool)
+  method{:axiom} Send(remote:IPEndPoint, buffer:array<byte>) returns(ok:bool)
     requires env.Valid()
     requires env.ok.ok()
     requires IsOpen()
     requires buffer.Length <= MaxPacketSize()
     modifies this
     modifies env.ok
-    modifies env.net
+    modifies env.udp
     ensures  env == old(env)
     ensures  env.ok.ok() == ok
-    ensures  MyPublicKey() == old(MyPublicKey())
+    ensures  LocalEndPoint() == old(LocalEndPoint())
     ensures  ok ==> IsOpen()
-    ensures  ok ==> env.net.history() == old(env.net.history()) + [LIoOpSend(LPacket(EndPoint(remote), EndPoint(MyPublicKey()), buffer[..]))]
+    ensures  ok ==> env.udp.history() == old(env.udp.history()) + [LIoOpSend(LPacket(remote.EP(), LocalEndPoint(), buffer[..]))]
 }
 
 // jonh temporarily neutered this because the opaque type can't be compiled
@@ -212,19 +240,6 @@ class MutableSet<T(0,==,!new)>
     ensures SetOf(this) == {}
 }
 
-function KVTupleSeqToMap<K(!new), V(!new)>(kvs: seq<(K, V)>) : (m: map<K, V>)
-  ensures  forall k, v :: (k, v) in kvs ==> k in m
-  ensures  forall k :: k in m ==> (k, m[k]) in kvs
-{
-  if |kvs| == 0 then
-    map []
-  else
-    var kvs_prefix := kvs[..|kvs|-1];
-    var m_prefix := KVTupleSeqToMap(kvs_prefix);
-    var kv_last := kvs[|kvs|-1];
-    m_prefix[kv_last.0 := kv_last.1]
-}
-
 class MutableMap<K(==),V>
 {
   static function method {:axiom} MapOf(m:MutableMap<K,V>) : map<K,V>
@@ -237,9 +252,6 @@ class MutableMap<K(==),V>
   static method {:axiom} FromMap(dafny_map:map<K,V>) returns (m:MutableMap<K,V>)
     ensures MapOf(m) == dafny_map
     ensures fresh(m)
-
-  static method {:axiom} FromKVTuples(kvs:seq<(K, V)>) returns (m:MutableMap<K, V>)
-    ensures MapOf(m) == KVTupleSeqToMap(kvs)
 
   constructor{:axiom} () requires false
 
@@ -264,12 +276,7 @@ class MutableMap<K(==),V>
 
   method {:axiom} Remove(key:K) 
     modifies this
-    ensures MapOf(this) == old(MapOf(this)) - { key }
-
-  method {:axiom} AsKVTuples() returns (kvs:seq<(K, V)>)
-    ensures |kvs| == |MapOf(this).Keys|
-    ensures forall k :: k in MapOf(this) ==> (k, MapOf(this)[k]) in kvs
-    ensures forall k, v :: (k, v) in kvs ==> k in MapOf(this) && MapOf(this)[k] == v
+    ensures MapOf(this) == map k | k != key && k in old(MapOf(this)) :: old(MapOf(this))[k]
 }
 
 // Leverage .NET's ability to perform copies faster than one element at a time

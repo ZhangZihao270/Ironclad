@@ -2,11 +2,8 @@ include "../../../Common/Logic/Temporal/Rules.i.dfy"
 include "Assumptions.i.dfy"
 
 module LivenessProof__Constants_i {
-import opened LivenessProof__Assumptions_i
-import opened LiveSHT__SHT_i
-import opened SHT__Configuration_i
 import opened Temporal__Rules_i
-import opened Temporal__Temporal_s
+import opened LivenessProof__Assumptions_i
 
 ///////////////////////////////
 // INVARIANT LEMMAS

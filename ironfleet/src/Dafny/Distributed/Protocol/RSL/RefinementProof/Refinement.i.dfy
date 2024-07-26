@@ -26,7 +26,7 @@ import opened Collections__Seqs_s
 import opened Collections__Sets_i
 import opened Collections__Maps2_s
 import opened Temporal__Temporal_s
-import opened AppStateMachine_s
+import opened AppStateMachine_i
 
 function GetServerAddresses(ps:RslState):set<NodeIdentity>
 {
@@ -80,6 +80,8 @@ lemma lemma_ProduceAbstractStateSatisfiesRefinementRelation(
     ensures Reply(p.dst, p.msg.seqno_reply, p.msg.reply) in rs.replies
   {
     assert p.src in GetServerAddresses(ps);
+    // assert p in b[i].environment.sentPackets;
+    // assert p in b[i-1].environment.sentPackets;
     var qs', batches', batch_num, req_num := lemma_ReplySentIsAllowed(b, c, i, p);
     lemma_RegularQuorumOf2bSequenceIsPrefixOfMaximalQuorumOf2bSequence(b, c, i, qs', qs);
     lemma_GetReplyFromRequestBatchesMatchesInSubsequence(batches', batches, batch_num, req_num);
@@ -105,7 +107,6 @@ lemma lemma_ProduceIntermediateAbstractStatesSatisfiesNext(
   )
   requires |batches| > 0
   requires 0 <= reqs_in_last_batch < |last(batches)|
-  requires |last(batches)[reqs_in_last_batch].request| <= MaxAppRequestSize()
   ensures  request == last(batches)[reqs_in_last_batch]
   ensures  RslSystemNextServerExecutesRequest(ProduceIntermediateAbstractState(server_addresses, batches, reqs_in_last_batch),
                                               ProduceIntermediateAbstractState(server_addresses, batches, reqs_in_last_batch+1), request)
@@ -116,18 +117,18 @@ lemma lemma_ProduceIntermediateAbstractStatesSatisfiesNext(
   request := last(batches)[reqs_in_last_batch];
   var reply := GetReplyFromRequestBatches(batches, |batches|-1, reqs_in_last_batch);
 
-  assert rs'.requests == rs.requests + { request };
-  assert rs'.replies == rs.replies + { reply };
+  // assert rs'.requests == rs.requests + { request };
+  // assert rs'.replies == rs.replies + { reply };
 
-  var stateBeforePrevBatch := GetAppStateFromRequestBatches(all_but_last(batches));
-  var appStatesDuringBatch := HandleRequestBatch(stateBeforePrevBatch, last(batches)).0;
-  var g_replies := HandleRequestBatch(stateBeforePrevBatch, last(batches)).1;
-  lemma_HandleRequestBatchTriggerHappy(stateBeforePrevBatch, last(batches), appStatesDuringBatch, g_replies);
-  var result := AppHandleRequest(rs.app, last(batches)[reqs_in_last_batch].request);
-  assert rs'.app == result.0;
-  assert reply.reply == result.1;
+  // var stateBeforePrevBatch := GetAppStateFromRequestBatches(all_but_last(batches));
+  // var appStatesDuringBatch := HandleRequestBatch(stateBeforePrevBatch, last(batches)).0;
+  // var g_replies := HandleRequestBatch(stateBeforePrevBatch, last(batches)).1;
+  // lemma_HandleRequestBatchTriggerHappy(stateBeforePrevBatch, last(batches), appStatesDuringBatch, g_replies);
+  // var result := AppHandleRequest(rs.app, last(batches)[reqs_in_last_batch].request);
+  // assert rs'.app == result.0;
+  // assert reply.reply == result.1;
 
-  assert RslSystemNextServerExecutesRequest(rs, rs', request);
+  // assert RslSystemNextServerExecutesRequest(rs, rs', request);
 }
 
 lemma lemma_FirstProduceIntermediateAbstractStateProducesAbstractState(
@@ -269,7 +270,6 @@ lemma lemma_DemonstrateRslSystemNextWhenBatchExtended(
   )
   requires |batches| > 0
   requires 0 <= count <= |last(batches)|
-  requires forall req, batch :: batch in batches && req in batch ==> |req.request| <= MaxAppRequestSize()
   requires s == ProduceIntermediateAbstractState(server_addresses, batches, 0)
   requires s' == ProduceIntermediateAbstractState(server_addresses, batches, count)
   ensures  RslStateSequenceReflectsBatchExecution(s, s', intermediate_states, batch)
@@ -289,9 +289,6 @@ lemma lemma_DemonstrateRslSystemNextWhenBatchExtended(
                                                                                                   batches, count - 1);
 
   intermediate_states := intermediate_states_middle + [s'];
-
-  assert last(batches) in batches && last(batches)[count-1] in last(batches);
-  assert |last(batches)[count-1].request| <= MaxAppRequestSize();
 
   var next_request := lemma_ProduceIntermediateAbstractStatesSatisfiesNext(server_addresses, batches, count-1);
   batch := batch_middle + [next_request];
@@ -313,7 +310,6 @@ lemma lemma_DemonstrateRslSystemNextWhenBatchesAdded(
   requires s' == ProduceAbstractState(server_addresses, batches')
   requires |batches| <= |batches'|
   requires batches'[..|batches|] == batches
-  requires forall req, batch :: batch in batches' && req in batch ==> |req.request| <= MaxAppRequestSize()
   ensures  RslStateSequenceReflectsBatchExecution(s, s', intermediate_states, batch)
   ensures  RslSystemNext(s, s')
   decreases |batches'|
@@ -329,7 +325,7 @@ lemma lemma_DemonstrateRslSystemNextWhenBatchesAdded(
 
   var s_middle := ProduceAbstractState(server_addresses, all_but_last(batches'));
   var intermediate_states_middle, batch_middle := lemma_DemonstrateRslSystemNextWhenBatchesAdded(server_addresses, s, s_middle,
-                                                                                                 batches, all_but_last(batches'));
+                                                                                                   batches, all_but_last(batches'));
   lemma_FirstProduceIntermediateAbstractStateProducesAbstractState(server_addresses, batches');
   lemma_LastProduceIntermediateAbstractStateProducesAbstractState(server_addresses, batches');
   var intermediate_states_next, batch_next := lemma_DemonstrateRslSystemNextWhenBatchExtended(server_addresses, s_middle, s', batches',
@@ -373,14 +369,6 @@ lemma lemma_GetBehaviorRefinementForPrefix(
 
   lemma_IfValidQuorumOf2bsSequenceNowThenNext(b, c, i-1, prev_qs);
   lemma_RegularQuorumOf2bSequenceIsPrefixOfMaximalQuorumOf2bSequence(b, c, i, prev_qs, qs);
-
-  forall req, batch | batch in batches && req in batch
-    ensures |req.request| <= MaxAppRequestSize()
-  {
-    var batch_num :| 0 <= batch_num < |batches| && batches[batch_num] == batch;
-    var req_num :| 0 <= req_num < |batch| && batch[req_num] == req;
-    var p := lemma_DecidedRequestWasSentByClient(b, c, i, qs, batches, batch_num, req_num);
-  }
 
   var s' := ProduceAbstractState(server_addresses, batches);
   var intermediate_states, batch := lemma_DemonstrateRslSystemNextWhenBatchesAdded(server_addresses, last(prev_high_level_behavior),

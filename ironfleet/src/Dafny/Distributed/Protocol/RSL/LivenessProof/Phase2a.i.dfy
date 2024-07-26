@@ -241,7 +241,7 @@ lemma lemma_IfLiveReplicasReadyForAnOperationThenLearnerEventuallyLearnsItLastSt
   var op_learnable := s3.executor.ops_complete < opn || (s3.executor.ops_complete == opn && s3.executor.next_op_to_execute.OutstandingOpUnknown?);
   assert op_learnable;
   assert LLearnerProcess2b(s3.learner, s3'.learner, p);
-  lemma_LearnerMaxBallotSeenNeverExceedsViewDuringPhase2(b, asp, h, third_step, learner_idx);
+  lemma_Learnermax_balSeenNeverExceedsViewDuringPhase2(b, asp, h, third_step, learner_idx);
   assert p.src in s3.learner.constants.all.config.replica_ids;
   assert !BalLt(p.msg.bal_2b, s3.learner.max_ballot_seen);
     
@@ -448,8 +448,8 @@ lemma lemma_IfLearnerHas2bFromAcceptorItKeepsItHelper2(
   assert NoReplicaBeyondView(b[j], h.view);
   lemma_ProposerStaysInState2InPhase2(b, asp, h, j);
   lemma_ProposerStaysInState2InPhase2(b, asp, h, j+1);
-  lemma_LearnerMaxBallotSeenNeverExceedsViewDuringPhase2(b, asp, h, j, learner_idx);
-  lemma_LearnerMaxBallotSeenNeverExceedsViewDuringPhase2(b, asp, h, j+1, learner_idx);
+  lemma_Learnermax_balSeenNeverExceedsViewDuringPhase2(b, asp, h, j, learner_idx);
+  lemma_Learnermax_balSeenNeverExceedsViewDuringPhase2(b, asp, h, j+1, learner_idx);
   assert s'.learner.max_ballot_seen != s.learner.max_ballot_seen || s'.learner.unexecuted_learner_state != s.learner.unexecuted_learner_state;
   var ios := lemma_ActionThatChangesReplicaIsThatReplicasAction(b, asp.c, j, learner_idx);
   assert BalLeq(s.learner.max_ballot_seen, s'.learner.max_ballot_seen);

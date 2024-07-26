@@ -1,10 +1,9 @@
 include "../../Common/Framework/Main.s.dfy"
-include "../../Common/Native/Io.s.dfy"
 include "LockDistributedSystem.i.dfy"
 include "../../Common/Framework/Environment.s.dfy"
 include "../../Protocol/Common/NodeIdentity.i.dfy"
 include "../../Impl/Lock/PacketParsing.i.dfy"
-include "../../Impl/Lock/NetLock.i.dfy"
+include "../../Impl/Lock/UdpLock.i.dfy"
 include "../../Impl/Lock/Host.i.dfy"
 include "AbstractService.s.dfy"
 include "../../Protocol/Lock/RefinementProof/Refinement.i.dfy"
@@ -12,12 +11,13 @@ include "../../Protocol/Lock/RefinementProof/RefinementProof.i.dfy"
 include "Marshall.i.dfy"
 
 module Main_i refines Main_s {
+    import opened Native__NativeTypes_s
     import opened DS_s = Lock_DistributedSystem_i
     import opened Environment_s
     import opened Types_i
     import opened Concrete_NodeIdentity_i
     import opened PacketParsing_i
-    import opened NetLock_i
+    import opened UdpLock_i
     import opened AS_s = AbstractServiceLock_s`All
     import opened Protocol_Node_i
     import opened Refinement_i
@@ -33,8 +33,8 @@ module Main_i refines Main_s {
     import opened Common__SeqIsUniqueDef_i
     import opened Impl_Node_i
     export
-        provides DS_s, Native__Io_s, Native__NativeTypes_s
-        provides IronfleetMain
+        provides DS_s, Native__Io_s
+        provides Main
 
     predicate IsValidBehavior(config:ConcreteConfiguration, db:seq<DS_State>)
         reads *;
@@ -97,7 +97,7 @@ module Main_i refines Main_s {
                      AbstractifyConcreteEnvStep(ds_env.nextStep))
     }
 
-    function {:opaque} AbstractifyConcreteReplicas(replicas:map<EndPoint,HostState>, replica_order:seq<EndPoint>) : map<EndPoint,Node>
+    function AbstractifyConcreteReplicas(replicas:map<EndPoint,HostState>, replica_order:seq<EndPoint>) : map<EndPoint,Node>
         requires forall i :: 0 <= i < |replica_order| ==> replica_order[i] in replicas;
         requires SeqIsUnique(replica_order);
         ensures  |AbstractifyConcreteReplicas(replicas, replica_order)| == |replica_order|;
@@ -116,6 +116,11 @@ module Main_i refines Main_s {
             
             var rest := AbstractifyConcreteReplicas(replicas, replica_order[1..]);
             rest[replica_order[0] := replicas[replica_order[0]].node]
+    }
+
+    function AbstractifyConcreteClients(clients:set<EndPoint>) : set<NodeIdentity>
+    {
+        set e | e in clients :: e
     }
 
     predicate DsStateIsAbstractable(ds:DS_State) 
@@ -200,7 +205,7 @@ module Main_i refines Main_s {
             ensures IsValidLIoOp(io, id, le);
         {
             var j :| 0 <= j < |r_ios| && r_ios[j] == io;
-            assert r_ios[j] == AstractifyNetEventToLockIo(ios[j]);
+            assert r_ios[j] == AstractifyUdpEventToLockIo(ios[j]);
             assert IsValidLIoOp(ios[j], id, de);
         }
     }
@@ -221,7 +226,7 @@ module Main_i refines Main_s {
         {
             var send :| send in sends && AbstractifyConcretePacket(send) == r;
             var io :| io in ios && io.LIoOpSend? && io.s == send;
-            assert AstractifyNetEventToLockIo(io) in r_ios;
+            assert AstractifyUdpEventToLockIo(io) in r_ios;
         }
 
         forall r | r in r_sends
@@ -229,7 +234,7 @@ module Main_i refines Main_s {
         {
             var r_io :| r_io in r_ios && r_io.LIoOpSend? && r_io.s == r; 
             var j :| 0 <= j < |r_ios| && r_ios[j] == r_io;
-            assert AstractifyNetEventToLockIo(ios[j]) == r_io;
+            assert AstractifyUdpEventToLockIo(ios[j]) == r_io;
             assert ios[j] in ios;
             assert ios[j].s in sends;
         }
@@ -261,24 +266,7 @@ module Main_i refines Main_s {
         assert LEnvironment_PerformIos(le, le', id, r_ios);
     }
 
-    lemma RefinementToLSStateHelper(ds:DS_State, ds':DS_State, ss:LS_State, ss':LS_State)
-        requires DsStateIsAbstractable(ds)
-        requires DsStateIsAbstractable(ds')
-        requires ss == AbstractifyDsState(ds)
-        requires ss' == AbstractifyDsState(ds')
-        requires DS_Next(ds, ds')
-        ensures  LS_Next(ss, ss')
-    {
-      reveal_HostNext();
-      if !ds.environment.nextStep.LEnvStepHostIos? {
-        assert LS_Next(ss, ss');
-      } else {
-        lemma_LEnvironmentNextHost(ds.environment, ss.environment, ds'.environment, ss'.environment);
-        assert LS_Next(ss, ss');
-      }
-    }
-
-    lemma RefinementToLSState(config:ConcreteConfiguration, db:seq<DS_State>) returns (sb:seq<LS_State>)
+    lemma {:timeLimitMultiplier 10} RefinementToLSState(config:ConcreteConfiguration, db:seq<DS_State>) returns (sb:seq<LS_State>)
         requires |db| > 0;
         requires DS_Init(db[0], config);
         requires forall i {:trigger DS_Next(db[i], db[i+1])} :: 0 <= i < |db| - 1 ==> DS_Next(db[i], db[i+1]);
@@ -295,6 +283,7 @@ module Main_i refines Main_s {
         } else {
             lemma_DeduceTransitionFromDsBehavior(config, db, |db|-2);
             lemma_DsConsistency(config, db, |db|-2);
+            lemma_DsConsistency(config, db, |db|-1);
             var ls := AbstractifyDsState(db[|db|-2]);
             var ls' := AbstractifyDsState(last(db));
             var rest := RefinementToLSState(config, all_but_last(db));
@@ -306,7 +295,12 @@ module Main_i refines Main_s {
                 if (0 <= i < |sb|-2) {
                     assert LS_Next(sb[i], sb[i+1]);
                 } else {
-                    RefinementToLSStateHelper(db[i], db[i+1], sb[i], sb[i+1]);
+                    if !db[i].environment.nextStep.LEnvStepHostIos? {
+                        assert LS_Next(sb[i], sb[i+1]);
+                    } else {
+                        lemma_LEnvironmentNextHost(db[i].environment, ls.environment, db[i+1].environment, ls'.environment);
+                        assert LS_Next(sb[i], sb[i+1]);
+                    }
                 }
             }
         }
@@ -499,7 +493,6 @@ module Main_i refines Main_s {
 
         lemma_DeduceTransitionFromDsBehavior(config, db, i-1);
         lemma_DsConsistency(config, db, i-1);
-        reveal_HostNext();
     }
 
     lemma RefinementProof(config:DS_s.H_s.ConcreteConfiguration, db:seq<DS_State>) returns (sb:seq<ServiceState>)

@@ -12,6 +12,7 @@ module Main_i refines Main_s {
     import opened AS_s = AbstractServiceSHT_s`Spec
     import opened DS_s = SHT_DistributedSystem_i
     import opened DS_s.H_s
+    import opened Native__NativeTypes_s
     import opened Math__mod_auto_i
     import opened Collections__Sets_i
     import opened Collections__Maps2_s
@@ -36,19 +37,18 @@ module Main_i refines Main_s {
     import opened SHT__InvDefs_i
     import opened SHT__InvProof_i
     import opened SHT__Refinement_i
-    import opened LiveSHT__NetSHT_i
+    import opened LiveSHT__UdpSHT_i
     import opened LiveSHT__SHT_i
     import opened LiveSHT__Environment_i
     import opened LiveSHT__Scheduler_i
     import opened LiveSHT__Unsendable_i
     import opened LiveSHT__SHTRefinement_i
     import opened Common__GenericMarshalling_i
-    import opened Common__NetClient_i
     import opened Common__NodeIdentity_i
-    
+
     export
-        provides DS_s, Native__Io_s, Native__NativeTypes_s
-        provides IronfleetMain
+        provides DS_s, Native__Io_s
+        provides Main
 
     predicate IsValidBehavior(config:ConcreteConfiguration, db:seq<DS_State>)
         reads *;
@@ -72,7 +72,7 @@ module Main_i refines Main_s {
     predicate LEnvStepIsAbstractable(step:LEnvStep<EndPoint,seq<byte>>)
     {
         match step {
-            case LEnvStepHostIos(actor, ios) => NetEventLogIsAbstractable(ios)
+            case LEnvStepHostIos(actor, ios) => UdpEventLogIsAbstractable(ios)
             case LEnvStepDeliverPacket(p) => LPacketIsAbstractable(p)
             case LEnvStepAdvanceTime => true
             case LEnvStepStutter => true 
@@ -112,7 +112,7 @@ module Main_i refines Main_s {
     }
 
     function AbstractifyConcreteConfiguration(ds_config:ConcreteConfiguration) : SHTConfiguration
-        requires ConstantsStateIsAbstractable(ds_config);
+        requires ConstantsStateIsValid(ds_config);
     {
         AbstractifyToConfiguration( 
                                 SHTConcreteConfiguration(
@@ -132,6 +132,11 @@ module Main_i refines Main_s {
         if replica_order == [] then []
         else
             [replicas[replica_order[0]].sched] + AbstractifyConcreteReplicas(replicas, replica_order[1..])
+    }
+
+    function AbstractifyConcreteClients(clients:set<EndPoint>) : set<NodeIdentity>
+    {
+        set e | e in clients :: e
     }
 
     predicate DsStateIsAbstractable(ds:DS_State) 
@@ -175,6 +180,7 @@ module Main_i refines Main_s {
         requires 0 <= i < |db|;
         ensures  db[i].config == config;
         ensures  Collections__Maps2_s.mapdomain(db[i].servers) == Collections__Maps2_s.mapdomain(db[0].servers);
+        ensures  db[i].clients == db[0].clients;
     {
         if i == 0 {
         } else {
@@ -234,7 +240,7 @@ module Main_i refines Main_s {
         requires 0 <= i < |db|;
         requires p.src in config.hostIds;
         requires p in db[i].environment.sentPackets;
-        ensures  NetPacketBound(p.msg);
+        ensures  UdpPacketBound(p.msg);
         ensures  CSingleMessageMarshallable(SHTDemarshallData(p.msg));
     {
         if i == 0 {
@@ -257,7 +263,7 @@ module Main_i refines Main_s {
         assert db[i-1].environment.nextStep.actor == p.src;
         assert DS_NextOneServer(db[i-1], db[i], p.src, ios);
         assert OnlySentMarshallableData(ios);
-        assert NetPacketBound(io.s.msg);
+        assert UdpPacketBound(io.s.msg);
         assert CSingleMessageMarshallable(SHTDemarshallData(io.s.msg));
     }
     
@@ -272,8 +278,8 @@ module Main_i refines Main_s {
         requires 0 <= i < |db|;
         requires id in db[i].servers;
         requires db[i].servers[id].sched.host.receivedPacket.Some?;
-        ensures  NetPacketIsAbstractable(p);
-        ensures  AbstractifyNetPacketToShtPacket(p) == db[i].servers[id].sched.host.receivedPacket.v;
+        ensures  UdpPacketIsAbstractable(p);
+        ensures  AbstractifyUdpPacketToShtPacket(p) == db[i].servers[id].sched.host.receivedPacket.v;
         ensures  p in db[i].environment.sentPackets;
         ensures  p.dst == id;
     {
@@ -482,25 +488,25 @@ module Main_i refines Main_s {
         assert ValidPhysicalEnvironmentStep(db[i-1].environment.nextStep);
     }
     
-    lemma lemma_NetEventIsAbstractable(
+    lemma lemma_UdpEventIsAbstractable(
         config:ConcreteConfiguration,
         db:seq<DS_State>,
         i:int,
-        net_event:NetEvent
+        udp_event:UdpEvent
         )
         requires IsValidBehavior(config, db);
         requires 0 <= i < |db| - 1;
         requires db[i].environment.nextStep.LEnvStepHostIos?;
-        requires net_event in db[i].environment.nextStep.ios;
-        ensures  NetEventIsAbstractable(net_event);
+        requires udp_event in db[i].environment.nextStep.ios;
+        ensures  UdpEventIsAbstractable(udp_event);
     {
-        if net_event.LIoOpTimeoutReceive? || net_event.LIoOpReadClock? {
+        if udp_event.LIoOpTimeoutReceive? || udp_event.LIoOpReadClock? {
             return;
         }
 
         lemma_DeduceTransitionFromDsBehavior(config, db, i);
         assert ValidPhysicalEnvironmentStep(db[i].environment.nextStep);
-        assert ValidPhysicalIo(net_event);
+        assert ValidPhysicalIo(udp_event);
     }
 
     lemma lemma_DsIsAbstractable(config:ConcreteConfiguration, db:seq<DS_State>, i:int)
@@ -525,11 +531,11 @@ module Main_i refines Main_s {
         var step := db[i].environment.nextStep;
         if step.LEnvStepHostIos? {
             forall io | io in step.ios
-                ensures NetEventIsAbstractable(io);
+                ensures UdpEventIsAbstractable(io);
             {
-                lemma_NetEventIsAbstractable(config, db, i, io);
+                lemma_UdpEventIsAbstractable(config, db, i, io);
             }
-            assert NetEventLogIsAbstractable(step.ios);
+            assert UdpEventLogIsAbstractable(step.ios);
         }
         else if step.LEnvStepDeliverPacket? {
             lemma_DeduceTransitionFromDsBehavior(config, db, i);
@@ -541,7 +547,7 @@ module Main_i refines Main_s {
 
     lemma lemma_IosRelations(ios:seq<LIoOp<EndPoint, seq<byte>>>, r_ios:seq<LIoOp<NodeIdentity, SingleMessage<Message>>>)
         returns (sends:set<LPacket<EndPoint, seq<byte>>>, r_sends:set<LPacket<NodeIdentity, SingleMessage<Message>>>) 
-        requires NetEventLogIsAbstractable(ios);
+        requires UdpEventLogIsAbstractable(ios);
         requires forall io :: io in ios && io.LIoOpSend? ==> LPacketIsAbstractable(io.s);
         requires r_ios == AbstractifyRawLogToIos(ios);
         ensures    sends == (set io | io in ios && io.LIoOpSend? :: io.s);
@@ -558,7 +564,7 @@ module Main_i refines Main_s {
         {
             var send :| send in sends && AbstractifyConcretePacket(send) == r;
             var io :| io in ios && io.LIoOpSend? && io.s == send;
-            assert AbstractifyNetEventToLSHTIo(io) in r_ios;
+            assert AbstractifyUdpEventToLSHTIo(io) in r_ios;
         }
 
         forall r | r in r_sends
@@ -566,7 +572,7 @@ module Main_i refines Main_s {
         {
             var r_io :| r_io in r_ios && r_io.LIoOpSend? && r_io.s == r; 
             var j :| 0 <= j < |r_ios| && r_ios[j] == r_io;
-            assert AbstractifyNetEventToLSHTIo(ios[j]) == r_io;
+            assert AbstractifyUdpEventToLSHTIo(ios[j]) == r_io;
             assert ios[j] in ios;
             assert ios[j].s in sends;
         }
@@ -589,7 +595,7 @@ module Main_i refines Main_s {
             ensures IsValidLIoOp(io, id, le);
         {
             var j :| 0 <= j < |r_ios| && r_ios[j] == io;
-            assert r_ios[j] == AbstractifyNetEventToLSHTIo(ios[j]);
+            assert r_ios[j] == AbstractifyUdpEventToLSHTIo(ios[j]);
             assert IsValidLIoOp(ios[j], id, de);
         }
     }
@@ -805,8 +811,8 @@ module Main_i refines Main_s {
         requires g == CSingleMessage_grammar();
         requires ValidGrammar(g);
         requires !Demarshallable(p.msg, g) || !CSingleMessageMarshallable(parse_CSingleMessage(DemarshallFunc(p.msg, g)));
-        requires NetPacketIsAbstractable(p);
-        requires rp == AbstractifyNetPacketToLSHTPacket(p);
+        requires UdpPacketIsAbstractable(p);
+        requires rp == AbstractifyUdpPacketToLSHTPacket(p);
         ensures    rp.msg.InvalidMessage?
                 || rp.msg.SingleMessage? //&& !rp.msg.m.GetRequest?)
     {
@@ -814,7 +820,7 @@ module Main_i refines Main_s {
         if Demarshallable(p.msg, g) {
             var cmsg := parse_CSingleMessage(DemarshallFunc(p.msg, g));
             if cmsg.CSingleMessage? {
-                assert !EndPointIsValidPublicKey(cmsg.dst) || !MessageMarshallable(cmsg.m);
+                assert !EndPointIsAbstractable(cmsg.dst) || !MessageMarshallable(cmsg.m);
             }
         }
     }
@@ -871,11 +877,11 @@ module Main_i refines Main_s {
         requires s.nextActionIndex == 1;
         requires IgnoreSchedulerUpdate(s, s');
         requires IosReflectIgnoringUnParseable(s, ios);
-        ensures  NetEventLogIsAbstractable(ios);
+        ensures  UdpEventLogIsAbstractable(ios);
         ensures  LScheduler_Next(s, s', AbstractifyRawLogToIos(ios));
     {
         assert |ios| == 0;
-        assert NetEventLogIsAbstractable([]);
+        assert UdpEventLogIsAbstractable([]);
         assert AbstractifyRawLogToIos([]) == [];
         if s.host.receivedPacket.v.src in s.host.constants.hostIds {
             // No real host would have sent such a mangled packet
@@ -915,7 +921,7 @@ module Main_i refines Main_s {
         assert DS_Next(db[i], db[i+1]);
         if HostNextIgnoreUnsendableReceive(s, s', ios) {
             var p := ios[0].r;
-            var rp := AbstractifyNetPacketToLSHTPacket(p);
+            var rp := AbstractifyUdpPacketToLSHTPacket(p);
             var g := CSingleMessage_grammar();
             assert !Demarshallable(p.msg, g) || !CSingleMessageMarshallable(parse_CSingleMessage(DemarshallFunc(p.msg, g)));
 
@@ -925,7 +931,7 @@ module Main_i refines Main_s {
                 assert false;
             }
 
-            lemma_NetEventIsAbstractable(config, db, i, ios[0]);
+            lemma_UdpEventIsAbstractable(config, db, i, ios[0]);
             lemma_CMessageGrammarValid();
             assert |p.msg| < 0x1_0000_0000_0000_0000;
             assert |g.cases| < 0x1_0000_0000;
@@ -1441,7 +1447,7 @@ module Main_i refines Main_s {
                     p in concretePkts 
                  && p.src in serviceState.serverAddresses 
                  && p.msg == MarshallServiceReply(reply, reserved_bytes)
-                 && |reserved_bytes| < 0x10_0000
+                 && |reserved_bytes| == 8
                  ensures reply in serviceState.replies;
             {
                 var lsht_packet := AbstractifyConcretePacket(p);
@@ -1480,7 +1486,7 @@ module Main_i refines Main_s {
             forall req | req in serviceState.requests && req.AppGetRequest? 
                       ensures exists p, reserved_bytes :: p in concretePkts && p.dst in serviceState.serverAddresses 
                                                    && p.msg == MarshallServiceGetRequest(req, reserved_bytes)
-                                                   && |reserved_bytes| < 0x10_0000;
+                                                   && |reserved_bytes| == 8;
             {
                 
                 assert serviceState == Refinement(sht_state);
@@ -1513,7 +1519,7 @@ module Main_i refines Main_s {
             forall req | req in serviceState.requests && req.AppSetRequest? 
                       ensures exists p, reserved_bytes :: p in concretePkts && p.dst in serviceState.serverAddresses 
                                                    && p.msg == MarshallServiceSetRequest(req, reserved_bytes)
-                                                   && |reserved_bytes| < 0x10_0000;
+                                                   && |reserved_bytes| == 8;
             {
                 assert serviceState == Refinement(sht_state);
                 var h,req_index :| h in maprange(sht_state.hosts) && 0 <= req_index < |h.receivedRequests| && req == h.receivedRequests[req_index];

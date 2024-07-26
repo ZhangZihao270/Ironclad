@@ -1,6 +1,6 @@
 module Collections__CountMatches_i {
 
-function CountMatchesInSeq<T(!new)>(s:seq<T>, f:T-->bool):int
+function method CountMatchesInSeq<T(!new)>(s:seq<T>, f:T-->bool):int
   reads f.reads
   requires forall x :: f.requires(x)
 {
@@ -53,7 +53,7 @@ lemma Lemma_MatchCountInSeqIsMatchCountInMultiset<T(!new)>(s:seq<T>, m:multiset<
   }
 }
 
-predicate IsNthHighestValueInSequence(v:int, s:seq<int>, n:int)
+predicate method IsNthHighestValueInSequence(v:int, s:seq<int>, n:int)
 {
   && 0 < n <= |s|
   && v in s

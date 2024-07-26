@@ -16,6 +16,7 @@ predicate imap2total<K1(!new), K2(!new), V>(m:imap2<K1, K2, V>)
   imaptotal(m) && forall k1 :: imaptotal(m[k1])
 }
 
+
 predicate imaptotal_(f:imap<int, int>) { imaptotal(f) } // TODO: remove hack when opaque/generic bug is fixed
 
 predicate monotonic(f:imap<int, int>)

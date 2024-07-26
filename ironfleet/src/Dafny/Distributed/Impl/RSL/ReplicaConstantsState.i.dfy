@@ -14,22 +14,22 @@ datatype ReplicaConstantsState = ReplicaConstantsState(
   my_index:uint64,
   all:ConstantsState)
 
-predicate ReplicaConstantsStateIsAbstractable(rc:ReplicaConstantsState)
+predicate CReplicaConstantsIsAbstractable(rc:ReplicaConstantsState)
 {
-  && ConstantsStateIsAbstractable(rc.all)
+  && CConstantsIsAbstractable(rc.all)
   && ReplicaIndexValid(rc.my_index, rc.all.config)
 }
 
-function AbstractifyReplicaConstantsStateToLReplicaConstants(rc:ReplicaConstantsState) : LReplicaConstants
-  requires ReplicaConstantsStateIsAbstractable(rc)
+function AbstractifyCReplicaConstantsToLReplicaConstants(rc:ReplicaConstantsState) : LReplicaConstants
+  requires CReplicaConstantsIsAbstractable(rc)
 {
-  LReplicaConstants(rc.my_index as int, AbstractifyConstantsStateToLConstants(rc.all))
+  LReplicaConstants(rc.my_index as int, AbstractifyCConstantsToLConstants(rc.all))
 }
 
 predicate ReplicaConstantsState_IsValid(rcs:ReplicaConstantsState)
 {
   && ConstantsStateIsValid(rcs.all)
-  && ReplicaConstantsStateIsAbstractable(rcs)
+  && CReplicaConstantsIsAbstractable(rcs)
 }
 
 method InitReplicaConstantsState(endPoint:EndPoint, config:CPaxosConfiguration) returns (rc:ReplicaConstantsState)

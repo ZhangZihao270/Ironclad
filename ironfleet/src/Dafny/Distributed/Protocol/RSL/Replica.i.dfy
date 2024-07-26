@@ -20,9 +20,10 @@ import opened LiveRSL__Learner_i
 import opened LiveRSL__Executor_i
 import opened LiveRSL__Broadcast_i
 import opened LiveRSL__Message_i
-import opened AppStateMachine_s
 import opened Common__UpperBound_s
 import opened Environment_s
+
+// 22
 
 datatype LReplica = LReplica(
   constants:LReplicaConstants,
@@ -53,21 +54,15 @@ predicate LReplicaNextProcessInvalid(s:LReplica, s':LReplica, received_packet:Rs
 predicate LReplicaNextProcessRequest(s:LReplica, s':LReplica, received_packet:RslPacket, sent_packets:seq<RslPacket>)
   requires received_packet.msg.RslMessage_Request?
 {
-  if |received_packet.msg.val| > MaxAppRequestSize() then
-    && sent_packets == []
-    && s' == s
+  if  && received_packet.src in s.executor.reply_cache
+      && s.executor.reply_cache[received_packet.src].Reply?
+      && received_packet.msg.seqno_req <= s.executor.reply_cache[received_packet.src].seqno then
+     && LExecutorProcessRequest(s.executor, received_packet, sent_packets)
+     && s' == s
   else
-    // We may always propose the request, no matter what the reply-cache state.
-    // If there's a matching or later request in the reply cache, we may instead reply out of the reply cache.
-    || (&& LProposerProcessRequest(s.proposer, s'.proposer, received_packet)
-       && sent_packets == []
-       && s' == s.(proposer := s'.proposer))
-
-    || (&& received_packet.src in s.executor.reply_cache
-       && s.executor.reply_cache[received_packet.src].Reply?
-       && received_packet.msg.seqno_req <= s.executor.reply_cache[received_packet.src].seqno
-       && LExecutorProcessRequest(s.executor, received_packet, sent_packets)
-       && s' == s)
+    && LProposerProcessRequest(s.proposer, s'.proposer, received_packet)
+    && sent_packets == []
+    && s' == s.(proposer := s'.proposer)
 }
 
 predicate LReplicaNextProcess1a(s:LReplica, s':LReplica, received_packet:RslPacket, sent_packets:seq<RslPacket>)
@@ -180,22 +175,36 @@ predicate LReplicaNextReadClockMaybeNominateValueAndSend2a(s:LReplica, s':LRepli
   && s' == s.(proposer := s'.proposer)
 }
 
+// predicate LReplicaNextSpontaneousTruncateLogBasedOnCheckpoints(s:LReplica, s':LReplica, sent_packets:seq<RslPacket>)
+// {
+//   (exists opn ::
+//         && IsLogTruncationPointValid(opn, s.acceptor.last_checkpointed_operation, s.constants.all.config)
+//         && opn > s.acceptor.log_truncation_point
+//         && LAcceptorTruncateLog(s.acceptor, s'.acceptor, opn)
+//         && s' == s.(acceptor := s'.acceptor)
+//         && sent_packets == []
+//   )
+//   ||
+//   (exists opn ::
+//         && IsLogTruncationPointValid(opn, s.acceptor.last_checkpointed_operation, s.constants.all.config)
+//         && opn <= s.acceptor.log_truncation_point
+//         && s' == s
+//         && sent_packets == []
+//   )
+// }
+
 predicate LReplicaNextSpontaneousTruncateLogBasedOnCheckpoints(s:LReplica, s':LReplica, sent_packets:seq<RslPacket>)
 {
-  (exists opn ::
+    exists opn ::
+        && opn in s.acceptor.last_checkpointed_operation
         && IsLogTruncationPointValid(opn, s.acceptor.last_checkpointed_operation, s.constants.all.config)
-        && opn > s.acceptor.log_truncation_point
-        && LAcceptorTruncateLog(s.acceptor, s'.acceptor, opn)
-        && s' == s.(acceptor := s'.acceptor)
-        && sent_packets == []
-  )
-  ||
-  (exists opn ::
-        && IsLogTruncationPointValid(opn, s.acceptor.last_checkpointed_operation, s.constants.all.config)
-        && opn <= s.acceptor.log_truncation_point
-        && s' == s
-        && sent_packets == []
-  )
+        && if opn > s.acceptor.log_truncation_point then
+            && LAcceptorTruncateLog(s.acceptor, s'.acceptor, opn)
+            && s' == s.(acceptor := s'.acceptor)
+            && sent_packets == []
+          else
+            && s' == s
+            && sent_packets == []
 }
 
 predicate LReplicaNextSpontaneousMaybeMakeDecision(s:LReplica, s':LReplica, sent_packets:seq<RslPacket>)
@@ -293,7 +302,7 @@ predicate LReplicaNextProcessPacketWithoutReadingClock(s:LReplica, s':LReplica, 
        case RslMessage_2b(_, _, _) => LReplicaNextProcess2b(s, s', ios[0].r, sent_packets)
        case RslMessage_Reply(_, _) => LReplicaNextProcessReply(s, s', ios[0].r, sent_packets)
        case RslMessage_AppStateRequest(_, _) => LReplicaNextProcessAppStateRequest(s, s', ios[0].r, sent_packets)
-       case RslMessage_AppStateSupply(_, _, _) => LReplicaNextProcessAppStateSupply(s, s', ios[0].r, sent_packets)
+       case RslMessage_AppStateSupply(_, _, _, _) => LReplicaNextProcessAppStateSupply(s, s', ios[0].r, sent_packets)
 }
 
 predicate LReplicaNextProcessPacket(s:LReplica, s':LReplica, ios:seq<RslIo>)
@@ -373,7 +382,9 @@ predicate LSchedulerInit(s:LScheduler, c:LReplicaConstants)
 
 predicate LSchedulerNext(s:LScheduler, s':LScheduler, ios:seq<RslIo>)
 {
-  && s'.nextActionIndex == (s.nextActionIndex + 1) % LReplicaNumActions()
+  && s'.nextActionIndex == (s.nextActionIndex + 1) % 1
+  // && LReplicaNextProcessPacket(s.replica, s'.replica, ios)
+  // && LReplicaNoReceiveNext(s.replica, s.nextActionIndex, s'.replica, ios)
   && if s.nextActionIndex == 0 then
       LReplicaNextProcessPacket(s.replica, s'.replica, ios)
     else

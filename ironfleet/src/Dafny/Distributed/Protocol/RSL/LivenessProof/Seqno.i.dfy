@@ -31,7 +31,6 @@ import opened CommonProof__Requests_i
 import opened Temporal__Heuristics_i
 import opened Temporal__Rules_i
 import opened Temporal__Temporal_s
-import opened AppStateMachine_s
 import opened Environment_s
 import opened EnvironmentSynchrony_s
 
@@ -76,6 +75,7 @@ predicate SequenceNumberPacketInv(p:RslPacket, req:Request)
   && (p.msg.RslMessage_1b? ==> SequenceNumberVotesInv(p.msg.votes, req))
   && (p.msg.RslMessage_2a? ==> SequenceNumberBatchInv(p.msg.val_2a, req))
   && (p.msg.RslMessage_2b? ==> SequenceNumberBatchInv(p.msg.val_2b, req))
+  && (p.msg.RslMessage_AppStateSupply? ==> SequenceNumberReplyCacheInv(p.msg.reply_cache, req))
 }
 
 predicate SequenceNumberReplicaInv(s:LReplica, req:Request)
@@ -426,6 +426,9 @@ lemma lemma_ReplicaNextPreservesSequenceNumberReplyCacheInv(
     }
     else if |ios| > 0 && ios[0].LIoOpReceive? && LExecutorProcessAppStateSupply(s.executor, s'.executor, ios[0].r)
     {
+      var inp := ios[0].r;
+      lemma_PacketProcessedImpliesPacketSent(ps, ps', idx, ios, inp);
+      assert SequenceNumberPacketInv(inp, req);
       assert SequenceNumberReplyCacheInv(s'.executor.reply_cache, req);
     }
     else
@@ -576,60 +579,37 @@ lemma lemma_RequestNeverHitsInReplyCache(
   requires inp.src == asp.persistent_request.client
   requires inp.msg.RslMessage_Request?
   requires inp.msg.seqno_req == asp.persistent_request.seqno
-  requires inp.msg.val == asp.persistent_request.request
   requires processing_sync_start <= i
   requires PacketProcessingSynchronous(b, asp, processing_sync_start, processing_bound)
   requires LReplicaNextProcessRequest(b[i].replicas[idx].replica, b[i+1].replicas[idx].replica, inp, ExtractSentPacketsFromIos(ios))
-  ensures  LProposerProcessRequest(b[i].replicas[idx].replica.proposer, b[i+1].replicas[idx].replica.proposer, inp)
-  ensures  ExtractSentPacketsFromIos(ios) == []
-  ensures  b[i+1].replicas[idx].replica == b[i].replicas[idx].replica.(proposer := b[i+1].replicas[idx].replica.proposer)
+  ensures  var reply_cache := b[i].replicas[idx].replica.executor.reply_cache;
+           inp.src in reply_cache && reply_cache[inp.src].Reply? ==> inp.msg.seqno_req > reply_cache[inp.src].seqno
 {
-  // If we satisfy the postcondition, we're done.
-
-  if && LProposerProcessRequest(b[i].replicas[idx].replica.proposer, b[i+1].replicas[idx].replica.proposer, inp)
-     && ExtractSentPacketsFromIos(ios) == []
-     && b[i+1].replicas[idx].replica == b[i].replicas[idx].replica.(proposer := b[i+1].replicas[idx].replica.proposer)
-  {
-    return;
-  }
-
-  // Since we don't satisfy the postcondition, we know that we sent a reply out of
-  // the reply cache.
-
   var executor := b[i].replicas[idx].replica.executor;
   var reply_cache := executor.reply_cache;
   var sent_packets := ExtractSentPacketsFromIos(ios);
-  assert |inp.msg.val| <= MaxAppRequestSize();
+  if inp.src in reply_cache && reply_cache[inp.src].Reply? && inp.msg.seqno_req <= reply_cache[inp.src].seqno
+  {
+    lemma_SequenceNumberReplyCacheInvHolds(b, asp, i, idx);
+    lemma_ConstantsAllConsistent(b, asp.c, i);
 
-  lemma_SequenceNumberReplyCacheInvHolds(b, asp, i, idx);
-  lemma_ConstantsAllConsistent(b, asp.c, i);
+    assert inp.msg.seqno_req == reply_cache[inp.src].seqno;
+    lemma_ReplyCacheStateInv(b, asp.c, i, inp.src);
+    assert reply_cache[inp.src].client == inp.src;
+    assert |sent_packets| == 1;
+    var p := sent_packets[0];
+    assert LIoOpSend(p) in ios;
 
-  // From the reply-cache invariant, we know that there can never be a sequence number
-  // in the reply cache beyond that of the persistent request.  Also, the protocol dictates
-  // that we don't send a reply out of the reply cache that precedes the given request.
-  // So it must be that the reply we sent out of the reply cache matches this request's
-  // sequence number.
+    assert asp.synchrony_start <= i;
+    assert p.src in SetOfReplicaIndicesToSetOfHosts(asp.live_quorum, asp.c.config.replica_ids) + { asp.persistent_request.client };
+    assert p.dst in SetOfReplicaIndicesToSetOfHosts(asp.live_quorum, asp.c.config.replica_ids) + { asp.persistent_request.client };
 
-  assert inp.msg.seqno_req == reply_cache[inp.src].seqno;
-  lemma_ReplyCacheStateInv(b, asp.c, i, inp.src);
-  assert reply_cache[inp.src].client == inp.src;
-  var p := sent_packets[0];
-  assert LIoOpSend(p) in ios;
-
-  // Since we sent a matching reply out of the reply cache, and we're in the synchronous
-  // period, the packet must be eventually received by the client.  This contradicts
-  // the assumption that the client never receives a reply.  And this contradiction
-  // completes the proof.
-
-  assert asp.synchrony_start <= i;
-  assert p.src in SetOfReplicaIndicesToSetOfHosts(asp.live_quorum, asp.c.config.replica_ids) + { asp.persistent_request.client };
-  assert p.dst in SetOfReplicaIndicesToSetOfHosts(asp.live_quorum, asp.c.config.replica_ids) + { asp.persistent_request.client };
-
-  var delivery_step := lemma_PacketSentEventuallyDelivered(b, asp, i, p);
-  lemma_ConstantsAllConsistent(b, asp.c, delivery_step);
-  assert ReplyDeliveredDuringStep(b[delivery_step], asp.persistent_request);
-  TemporalDeduceFromAlways(0, delivery_step, not(ReplyDeliveredTemporal(b, asp.persistent_request)));
-  assert false;
+    var delivery_step := lemma_PacketSentEventuallyDelivered(b, asp, i, p);
+    lemma_ConstantsAllConsistent(b, asp.c, delivery_step);
+    assert ReplyDeliveredDuringStep(b[delivery_step], asp.persistent_request);
+    TemporalDeduceFromAlways(0, delivery_step, not(ReplyDeliveredTemporal(b, asp.persistent_request)));
+    assert false;
+  }
 }
 
 }

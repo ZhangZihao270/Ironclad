@@ -8,6 +8,8 @@ import opened Collections__Sets_i
 import opened Collections__Seqs_i
 import opened Concrete_NodeIdentity_i
 
+// 1
+
 datatype LConfiguration = LConfiguration(
   clientIds:set<NodeIdentity>,
   replica_ids:seq<NodeIdentity>
@@ -24,10 +26,16 @@ predicate ReplicasDistinct(replica_ids:seq<NodeIdentity>, i:int, j:int)
   0 <= i < |replica_ids| && 0 <= j < |replica_ids| && replica_ids[i] == replica_ids[j] ==> i == j
 }
 
+predicate ReplicasIsUnique(replica_ids:seq<NodeIdentity>)
+{
+  forall i,j :: 0 <= i < |replica_ids| && 0 <= j < |replica_ids| && replica_ids[i] == replica_ids[j] ==> i == j
+}
+
 predicate WellFormedLConfiguration(c:LConfiguration)
 {
   && 0 < |c.replica_ids|
   && (forall i, j :: ReplicasDistinct(c.replica_ids, i, j))
+  && ReplicasIsUnique(c.replica_ids)
 }
 
 predicate IsReplicaIndex(idx:int, id:NodeIdentity, c:LConfiguration)
@@ -39,7 +47,8 @@ predicate IsReplicaIndex(idx:int, id:NodeIdentity, c:LConfiguration)
 function GetReplicaIndex(id:NodeIdentity, c:LConfiguration):int
   requires id in c.replica_ids
   ensures  var idx := GetReplicaIndex(id, c);
-           0 <= idx < |c.replica_ids| && c.replica_ids[idx] == id
+            IsReplicaIndex(idx,id,c)
+          //  0 <= idx < |c.replica_ids| && c.replica_ids[idx] == id
 {
   FindIndexInSeq(c.replica_ids, id)
 }

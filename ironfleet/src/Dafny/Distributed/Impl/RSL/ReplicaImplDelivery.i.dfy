@@ -1,10 +1,10 @@
 include "../../Common/Collections/Seqs.i.dfy"
 include "../../../Libraries/Math/mod_auto.i.dfy"
 include "../../Protocol/RSL/Replica.i.dfy"
-include "ReplicaModel.i.dfy"
+include "ReplicaImpl.i.dfy"
 include "ReplicaImplLemmas.i.dfy"
 include "ReplicaImplClass.i.dfy"
-include "NetRSL.i.dfy"
+include "UdpRSL.i.dfy"
 include "CClockReading.i.dfy"
 
 module LiveRSL__ReplicaImplDelivery_i {
@@ -25,13 +25,13 @@ import opened LiveRSL__ReplicaImplLemmas_i
 import opened LiveRSL__ReplicaImplClass_i
 import opened LiveRSL__QRelations_i
 import opened LiveRSL__Types_i
-import opened LiveRSL__NetRSL_i
+import opened LiveRSL__UdpRSL_i
 import opened Common__NodeIdentity_i
-import opened Common__NetClient_i
+import opened Common__UdpClient_i
 import opened Common__Util_i
 import opened Environment_s
 
-method DeliverPacket(r:ReplicaImpl, packets:OutboundPackets) returns (ok:bool, ghost netEventLog:seq<NetEvent>, ghost ios:seq<RslIo>)
+method DeliverPacket(r:ReplicaImpl, packets:OutboundPackets) returns (ok:bool, ghost netEventLog:seq<UdpEvent>, ghost ios:seq<RslIo>)
   requires r.Valid()
   requires packets.OutboundPacket?
   requires OutboundPacketsIsValid(packets)
@@ -39,7 +39,7 @@ method DeliverPacket(r:ReplicaImpl, packets:OutboundPackets) returns (ok:bool, g
   modifies r.Repr
   ensures r.Repr == old(r.Repr)
   ensures r.netClient != null
-  ensures ok == NetClientOk(r.netClient)
+  ensures ok == UdpClientOk(r.netClient)
   ensures r.Env() == old(r.Env())
   ensures r.replica == old(r.replica)
   ensures ok ==>
@@ -49,23 +49,24 @@ method DeliverPacket(r:ReplicaImpl, packets:OutboundPackets) returns (ok:bool, g
           && AbstractifyOutboundCPacketsToSeqOfRslPackets(packets) == ExtractSentPacketsFromIos(ios)
           && OnlySentMarshallableData(netEventLog)
           && RawIoConsistentWithSpecIO(netEventLog, ios)
-          && old(r.Env().net.history()) + netEventLog == r.Env().net.history()
+          && old(r.Env().udp.history()) + netEventLog == r.Env().udp.history()
 {
-  var start_time := Time.GetDebugTimeTicks();
+  // var start_time := Time.GetDebugTimeTicks();
+  // print("ReplicaImplDelivery: Send Packet\n");
   ok, netEventLog := SendPacket(r.netClient, packets, r.localAddr);
-  if (!ok) { return; }
+  if (!ok) { print("ReplicaImplDelivery: send packet fail\n"); return; }
 
   ios := MapSentPacketToIos(packets.p);
   lemma_MapSentPacketToIosExtractSentPacketsFromIosEquivalence(packets.p, ios);
-  var end_time := Time.GetDebugTimeTicks();
+  // var end_time := Time.GetDebugTimeTicks();
   if packets.p.None? {
-    RecordTimingSeq("DeliverPacketEmpty", start_time, end_time);
+    // RecordTimingSeq("DeliverPacketEmpty", start_time, end_time);
   } else {
-    RecordTimingSeq("DeliverPacketSingleton", start_time, end_time);
+    // RecordTimingSeq("DeliverPacketSingleton", start_time, end_time);
   } 
 }
 
-method {:timeLimitMultiplier 2} DeliverPacketSequence(r:ReplicaImpl, packets:OutboundPackets) returns (ok:bool, ghost netEventLog:seq<NetEvent>, ghost ios:seq<RslIo>)
+method {:timeLimitMultiplier 2} DeliverPacketSequence(r:ReplicaImpl, packets:OutboundPackets) returns (ok:bool, ghost netEventLog:seq<UdpEvent>, ghost ios:seq<RslIo>)
   requires r.Valid()
   requires packets.PacketSequence?
   requires OutboundPacketsIsValid(packets)
@@ -74,7 +75,7 @@ method {:timeLimitMultiplier 2} DeliverPacketSequence(r:ReplicaImpl, packets:Out
   modifies r.Repr
   ensures r.Repr == old(r.Repr)
   ensures r.netClient != null
-  ensures ok == NetClientOk(r.netClient)
+  ensures ok == UdpClientOk(r.netClient)
   ensures r.Env() == old(r.Env())
   ensures r.replica == old(r.replica)
   ensures ok ==>
@@ -84,26 +85,27 @@ method {:timeLimitMultiplier 2} DeliverPacketSequence(r:ReplicaImpl, packets:Out
           && AbstractifyOutboundCPacketsToSeqOfRslPackets(packets) == ExtractSentPacketsFromIos(ios)
           && OnlySentMarshallableData(netEventLog)
           && RawIoConsistentWithSpecIO(netEventLog, ios)
-          && old(r.Env().net.history()) + netEventLog == r.Env().net.history()
+          && old(r.Env().udp.history()) + netEventLog == r.Env().udp.history()
 {
-  var start_time := Time.GetDebugTimeTicks();
+  // var start_time := Time.GetDebugTimeTicks();
+  // print("ReplicaImplDelivery: Send Packet Seq\n");
   ok, netEventLog := SendPacketSequence(r.netClient, packets, r.localAddr);
-  if (!ok) { return; }
+  if (!ok) { print("ReplicaImplDelivery: send packetseq fail\n"); return; }
 
   ios := MapSentPacketSeqToIos(packets.s);
   lemma_MapSentPacketSeqToIosExtractSentPacketsFromIosEquivalence(packets, ios);
-  var end_time := Time.GetDebugTimeTicks();
-  RecordTimingSeq("DeliverPacketSequence", start_time, end_time);
+  // var end_time := Time.GetDebugTimeTicks();
+  // RecordTimingSeq("DeliverPacketSequence", start_time, end_time);
 }
 
-method{:timeLimitMultiplier 2} DeliverBroadcast(r:ReplicaImpl, broadcast:CBroadcast) returns (ok:bool, ghost netEventLog:seq<NetEvent>, ghost ios:seq<RslIo>)
+method{:timeLimitMultiplier 2} DeliverBroadcast(r:ReplicaImpl, broadcast:CBroadcast) returns (ok:bool, ghost netEventLog:seq<UdpEvent>, ghost ios:seq<RslIo>)
   requires r.Valid()
   requires CBroadcastIsValid(broadcast)
   requires broadcast.CBroadcast? ==> broadcast.src == r.replica.constants.all.config.replica_ids[r.replica.constants.my_index];
   modifies r.Repr
   ensures r.Repr == old(r.Repr)
   ensures r.netClient != null
-  ensures ok == NetClientOk(r.netClient)
+  ensures ok == UdpClientOk(r.netClient)
   ensures r.Env() == old(r.Env())
   ensures r.replica == old(r.replica)
   ensures ok ==>
@@ -113,17 +115,20 @@ method{:timeLimitMultiplier 2} DeliverBroadcast(r:ReplicaImpl, broadcast:CBroadc
           && AbstractifyCBroadcastToRlsPacketSeq(broadcast) == ExtractSentPacketsFromIos(ios)
           && OnlySentMarshallableData(netEventLog)
           && RawIoConsistentWithSpecIO(netEventLog, ios)
-          && old(r.Env().net.history()) + netEventLog == r.Env().net.history()
+          && old(r.Env().udp.history()) + netEventLog == r.Env().udp.history()
 {
-  var start_time := Time.GetDebugTimeTicks();
+  // var start_time := Time.GetDebugTimeTicks();
+  // print("ReplicaImplDelivery: Send Broadcast\n");
   ok, netEventLog := SendBroadcast(r.netClient, broadcast, r.localAddr);
-  if (!ok) { return; }
+  if (!ok) { 
+    print("ReplicaImplDelivery: send broadcast fail\n");
+    return; }
 
   ios := MapBroadcastToIos(broadcast);
   lemma_MapBroadcastToIosExtractSentPacketsFromIosEquivalence(broadcast, ios);
     
   lemma_NetEventLogToBroadcastRefinable(netEventLog, broadcast);
-  assert NetEventLogIsAbstractable(netEventLog);
+  assert UdpEventLogIsAbstractable(netEventLog);
   if broadcast.CBroadcastNop? {
     assert RawIoConsistentWithSpecIO(netEventLog, ios);
   } else {
@@ -141,7 +146,7 @@ method{:timeLimitMultiplier 2} DeliverBroadcast(r:ReplicaImpl, broadcast:CBroadc
         {
           calc {
             AbstractifyRawLogToIos(netEventLog)[i];
-            AbstractifyNetEventToRslIo(netEventLog[i]);
+            AbstractifyUdpEventToRslIo(netEventLog[i]);
               { lemma_NetEventLogToBroadcast(netEventLog, broadcast, i); }
             LIoOpSend(AbstractifyCBroadcastToRlsPacketSeq(broadcast)[i]);
             LIoOpSend(BuildLBroadcast(AbstractifyEndPointToNodeIdentity(broadcast.src), 
@@ -178,25 +183,28 @@ method{:timeLimitMultiplier 2} DeliverBroadcast(r:ReplicaImpl, broadcast:CBroadc
     assert RawIoConsistentWithSpecIO(netEventLog, ios);
   }
 
-  var end_time := Time.GetDebugTimeTicks();
+  // var end_time := Time.GetDebugTimeTicks();
   if broadcast.CBroadcastNop? || (broadcast.CBroadcast? && |broadcast.dsts| as uint64 == 0) {
-    RecordTimingSeq("DeliverBroadcastEmpty", start_time, end_time);
+    // RecordTimingSeq("DeliverBroadcastEmpty", start_time, end_time);
   } else if broadcast.CBroadcast? && |broadcast.dsts| as uint64 == 1 {
-    RecordTimingSeq("DeliverBroadcastSingleton", start_time, end_time);
+    // RecordTimingSeq("DeliverBroadcastSingleton", start_time, end_time);
   } else {
-    RecordTimingSeq("DeliverBroadcastMany", start_time, end_time);
+    // RecordTimingSeq("DeliverBroadcastMany", start_time, end_time);
   }
 }
 
-method DeliverOutboundPackets(r:ReplicaImpl, packets:OutboundPackets) returns (ok:bool, ghost netEventLog:seq<NetEvent>, ghost ios:seq<RslIo>)
+method DeliverOutboundPackets(r:ReplicaImpl, packets:OutboundPackets) returns (ok:bool, ghost netEventLog:seq<UdpEvent>, ghost ios:seq<RslIo>)
   requires r.Valid()
+
+  // the send packet is valid
   requires OutboundPacketsIsValid(packets)
   requires OutboundPacketsIsAbstractable(packets)
   requires OutboundPacketsHasCorrectSrc(packets, r.replica.constants.all.config.replica_ids[r.replica.constants.my_index]);
+  
   modifies r.Repr
   ensures r.Repr == old(r.Repr)
   ensures r.netClient != null
-  ensures ok == NetClientOk(r.netClient)
+  ensures ok == UdpClientOk(r.netClient)
   ensures r.Env() == old(r.Env())
   ensures r.replica == old(r.replica)
   ensures ok ==>
@@ -207,12 +215,12 @@ method DeliverOutboundPackets(r:ReplicaImpl, packets:OutboundPackets) returns (o
             && OnlySentMarshallableData(netEventLog)
             && RawIoConsistentWithSpecIO(netEventLog, ios)
             && OnlySentMarshallableData(netEventLog)
-            && old(r.Env().net.history()) + netEventLog == r.Env().net.history()
+            && old(r.Env().udp.history()) + netEventLog == r.Env().udp.history()
 {
   match packets {
-    case Broadcast(broadcast) => ok, netEventLog, ios := DeliverBroadcast(r, broadcast);
     case OutboundPacket(p) => ok, netEventLog, ios := DeliverPacket(r, packets);
     case PacketSequence(s) => ok, netEventLog, ios := DeliverPacketSequence(r, packets);
+    case Broadcast(broadcast) => ok, netEventLog, ios := DeliverBroadcast(r, broadcast);
   }
 }
 

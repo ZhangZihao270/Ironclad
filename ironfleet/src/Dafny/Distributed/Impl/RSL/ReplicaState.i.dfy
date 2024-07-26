@@ -1,6 +1,6 @@
 include "../../Protocol/RSL/Replica.i.dfy"
 include "ReplicaConstantsState.i.dfy"
-include "ProposerState.i.dfy"
+include "CProposer.i.dfy"
 include "AcceptorState.i.dfy"
 include "LearnerState.i.dfy"
 include "ExecutorState.i.dfy"
@@ -19,14 +19,14 @@ import opened LiveRSL__CTypes_i
 import opened LiveRSL__ExecutorState_i
 import opened LiveRSL__LearnerState_i
 import opened LiveRSL__PacketParsing_i
-import opened LiveRSL__ProposerState_i
+import opened LiveRSL__CProposer_i
 import opened LiveRSL__Replica_i
 import opened LiveRSL__ReplicaConstantsState_i
 
 datatype ReplicaState = ReplicaState(
   constants:ReplicaConstantsState,
   nextHeartbeatTime:uint64,
-  proposer:ProposerState,
+  proposer:CProposer,
   acceptor:AcceptorState,
   learner:CLearnerState,
   executor:ExecutorState
@@ -34,24 +34,22 @@ datatype ReplicaState = ReplicaState(
 
 predicate ReplicaStateIsAbstractable(replica:ReplicaState)
 {
-  && ReplicaConstantsStateIsAbstractable(replica.constants)
-  && ProposerIsAbstractable(replica.proposer)
+  && CReplicaConstantsIsAbstractable(replica.constants)
+  && CProposerIsAbstractable(replica.proposer)
   && AcceptorIsAbstractable(replica.acceptor)
-  && LearnerState_IsAbstractable(replica.learner)
+  && CLearnerIsAbstractable(replica.learner)
   && ExecutorState_IsAbstractable(replica.executor)
 }
 
-function AbstractifyReplicaStateToLReplica(replica:ReplicaState) : (lreplica:LReplica)
-  reads    replica.executor.app
+function AbstractifyReplicaStateToLReplica(replica:ReplicaState) : LReplica
   requires ReplicaStateIsAbstractable(replica)
-  ensures  lreplica.constants == AbstractifyReplicaConstantsStateToLReplicaConstants(replica.constants)
 {
   LReplica(
-    AbstractifyReplicaConstantsStateToLReplicaConstants(replica.constants),
+    AbstractifyCReplicaConstantsToLReplicaConstants(replica.constants),
     replica.nextHeartbeatTime as int,
-    AbstractifyProposerStateToLProposer(replica.proposer),
+    AbstractifyCProposerToLProposer(replica.proposer),
     AbstractifyAcceptorStateToAcceptor(replica.acceptor),
-    AbstractifyLearnerStateToLLearner(replica.learner),
+    AbstractifyCLearnerToLLearner(replica.learner),
     AbstractifyExecutorStateToLExecutor(replica.executor))
 }
 
@@ -66,18 +64,18 @@ predicate ReplicaReceivePreconditions(replica:ReplicaState, cpacket:CPacket)
 {
   && ReplicaCommonPreconditions(replica)
   && CPacketIsSendable(cpacket)
-  && PaxosEndPointIsValid(cpacket.src, replica.constants.all.config)
+  // && PaxosEndPointIsValid(cpacket.src, replica.constants.all.config)
 }
 
-predicate ReplicaCommonPostconditions(replica:LReplica, replica':ReplicaState, sent_packets:OutboundPackets)
+predicate ReplicaCommonPostconditions(replica:ReplicaState, replica':ReplicaState, sent_packets:OutboundPackets)
 {
-  && ReplicaConstantsState_IsValid(replica'.constants)
-  && AbstractifyReplicaConstantsStateToLReplicaConstants(replica'.constants) == replica.constants
+  && ReplicaCommonPreconditions(replica)
   && ReplicaStateIsAbstractable(replica')
   && OutboundPacketsIsValid(sent_packets)
   && OutboundPacketsIsAbstractable(sent_packets)
   && ReplicaStateIsValid(replica')
-  && OutboundPacketsHasCorrectSrc(sent_packets, replica'.constants.all.config.replica_ids[replica'.constants.my_index])
+  && OutboundPacketsHasCorrectSrc(sent_packets, replica.constants.all.config.replica_ids[replica.constants.my_index])
+  && replica'.constants == replica.constants
 }
 
 //
@@ -97,49 +95,44 @@ predicate ReplicaStateIsValid(replica:ReplicaState)
   && replica.constants == replica.executor.constants
 }
 
-predicate ConstantsStayConstant_Replica(replica:LReplica, replica':ReplicaState)
-  requires ReplicaConstantsStateIsAbstractable(replica'.constants)
+predicate ConstantsStayConstant_Replica(replica:ReplicaState, replica':ReplicaState)
 {
-  && AbstractifyReplicaConstantsStateToLReplicaConstants(replica'.constants) == replica.constants
-  && replica.constants == replica.proposer.constants
-  && replica.constants == replica.acceptor.constants
-  && replica.constants == replica.learner.constants
-  && replica.constants == replica.executor.constants
-  && replica'.constants == replica'.proposer.constants
-  && replica'.constants == replica'.acceptor.constants
-  && replica'.constants == replica'.learner.rcs
-  && replica'.constants == replica'.executor.constants
+  && replica.constants == replica'.constants
+  && replica.proposer.constants == replica'.proposer.constants
+  && replica.acceptor.constants == replica'.acceptor.constants
+  && replica.learner.rcs        == replica'.learner.rcs
+  && replica.executor.constants == replica'.executor.constants
 }
 
 predicate Replica_Common_Preconditions(replica:ReplicaState, inp:CPacket)
 {
   && ReplicaStateIsValid(replica)
   && CPacketIsSendable(inp)
-  && PaxosEndPointIsValid(inp.src, replica.constants.all.config)
+  // && PaxosEndPointIsValid(inp.src, replica.constants.all.config)
 }
 
-predicate Replica_Common_Postconditions(replica:LReplica, replica':ReplicaState, inp:CPacket, packets_sent:OutboundPackets)
+predicate Replica_Common_Postconditions(replica:ReplicaState, replica':ReplicaState, inp:CPacket, packets_sent:OutboundPackets)
+  requires Replica_Common_Preconditions(replica, inp)
 {
-  && ReplicaConstantsState_IsValid(replica'.constants)
-  && CPacketIsSendable(inp)
-  && PaxosEndPointIsValid(inp.src, replica'.constants.all.config)
   && ReplicaStateIsAbstractable(replica')
   && ConstantsStayConstant_Replica(replica, replica')
   && ReplicaStateIsValid(replica')
   && OutboundPacketsIsValid(packets_sent)
-  && OutboundPacketsHasCorrectSrc(packets_sent, replica'.constants.all.config.replica_ids[replica'.constants.my_index])
+  && OutboundPacketsHasCorrectSrc(packets_sent, replica.constants.all.config.replica_ids[replica.constants.my_index])
   && OutboundPacketsIsAbstractable(packets_sent)
+  && replica'.constants == replica.constants
 }
 
-predicate Replica_Common_Postconditions_NoPacket(replica:LReplica, replica':ReplicaState, packets_sent:OutboundPackets)
+predicate Replica_Common_Postconditions_NoPacket(replica:ReplicaState, replica':ReplicaState, packets_sent:OutboundPackets)
 {
-  && ReplicaConstantsState_IsValid(replica'.constants)
+  && ReplicaStateIsValid(replica)
   && ReplicaStateIsAbstractable(replica')
   && ConstantsStayConstant_Replica(replica, replica')
   && ReplicaStateIsValid(replica')
   && OutboundPacketsIsValid(packets_sent)
-  && OutboundPacketsHasCorrectSrc(packets_sent, replica'.constants.all.config.replica_ids[replica'.constants.my_index])
+  && OutboundPacketsHasCorrectSrc(packets_sent, replica.constants.all.config.replica_ids[replica.constants.my_index])
   && OutboundPacketsIsAbstractable(packets_sent)
+  && replica'.constants == replica.constants
 }
 
 predicate Replica_Next_Process_Request_Preconditions(replica:ReplicaState, inp:CPacket)
@@ -150,15 +143,12 @@ predicate Replica_Next_Process_Request_Preconditions(replica:ReplicaState, inp:C
   && inp.msg.CMessage_Request?
 }
 
-predicate Replica_Next_Process_Request_Postconditions(replica:LReplica, replica':ReplicaState, inp:CPacket,
-                                                      packets_sent:OutboundPackets)
-  reads replica'.executor.app
+predicate Replica_Next_Process_Request_Postconditions(replica:ReplicaState, replica':ReplicaState, inp:CPacket, packets_sent:OutboundPackets)
+  requires Replica_Next_Process_Request_Preconditions(replica, inp)
 {
-  && CPacketIsAbstractable(inp)
-  && inp.msg.CMessage_Request?
   && Replica_Common_Postconditions(replica, replica', inp, packets_sent)
   && LReplicaNextProcessRequest(
-      replica,
+      AbstractifyReplicaStateToLReplica(replica),
       AbstractifyReplicaStateToLReplica(replica'),
       AbstractifyCPacketToRslPacket(inp),
       AbstractifyOutboundCPacketsToSeqOfRslPackets(packets_sent))
@@ -170,15 +160,12 @@ predicate Replica_Next_Process_1a_Preconditions(replica:ReplicaState, inp:CPacke
   && NextAcceptorState_Phase1Preconditions(replica.acceptor, inp.msg, inp.src)
 }
 
-predicate Replica_Next_Process_1a_Postconditions(replica:LReplica, replica':ReplicaState, inp:CPacket,
-                                                 packets_sent:OutboundPackets)
-  reads replica'.executor.app
+predicate Replica_Next_Process_1a_Postconditions(replica:ReplicaState, replica':ReplicaState, inp:CPacket, packets_sent:OutboundPackets)
+  requires Replica_Next_Process_1a_Preconditions(replica, inp)
 {
-  && CPacketIsAbstractable(inp)
-  && inp.msg.CMessage_1a?
   && Replica_Common_Postconditions(replica, replica', inp, packets_sent)
   && LReplicaNextProcess1a(
-      replica,
+      AbstractifyReplicaStateToLReplica(replica),
       AbstractifyReplicaStateToLReplica(replica'),
       AbstractifyCPacketToRslPacket(inp),
       AbstractifyOutboundCPacketsToSeqOfRslPackets(packets_sent))
@@ -195,15 +182,12 @@ predicate Replica_Next_Process_1b_Preconditions(replica:ReplicaState, inp:CPacke
 //  && inp.msg.bal_1b == replica.proposer.max_ballot_i_sent_1a
 }
 
-predicate Replica_Next_Process_1b_Postconditions(replica:LReplica, replica':ReplicaState, inp:CPacket,
-                                                 packets_sent:OutboundPackets)
-  reads replica'.executor.app
+predicate Replica_Next_Process_1b_Postconditions(replica:ReplicaState, replica':ReplicaState, inp:CPacket, packets_sent:OutboundPackets)
+  requires Replica_Next_Process_1b_Preconditions(replica, inp)
 {
-  && CPacketIsAbstractable(inp)
-  && inp.msg.CMessage_1b?
   && Replica_Common_Postconditions(replica, replica', inp, packets_sent)
   && LReplicaNextProcess1b(
-      replica,
+      AbstractifyReplicaStateToLReplica(replica),
       AbstractifyReplicaStateToLReplica(replica'),
       AbstractifyCPacketToRslPacket(inp),
       AbstractifyOutboundCPacketsToSeqOfRslPackets(packets_sent))
@@ -216,15 +200,12 @@ predicate Replica_Next_Process_StartingPhase2_Preconditions(replica:ReplicaState
   && inp.msg.CMessage_StartingPhase2?
 }
 
-predicate Replica_Next_Process_StartingPhase2_Postconditions(replica:LReplica, replica':ReplicaState, inp:CPacket,
-                                                             packets_sent:OutboundPackets)
-  reads replica'.executor.app
+predicate Replica_Next_Process_StartingPhase2_Postconditions(replica:ReplicaState, replica':ReplicaState, inp:CPacket, packets_sent:OutboundPackets)
+  requires Replica_Next_Process_StartingPhase2_Preconditions(replica, inp)
 {
-  && CPacketIsAbstractable(inp)
-  && inp.msg.CMessage_StartingPhase2?
   && Replica_Common_Postconditions(replica, replica', inp, packets_sent)
   && LReplicaNextProcessStartingPhase2(
-      replica,
+      AbstractifyReplicaStateToLReplica(replica),
       AbstractifyReplicaStateToLReplica(replica'),
       AbstractifyCPacketToRslPacket(inp),
       AbstractifyOutboundCPacketsToSeqOfRslPackets(packets_sent))
@@ -236,15 +217,12 @@ predicate Replica_Next_Process_2a_Preconditions(replica:ReplicaState, inp:CPacke
   && NextAcceptorState_Phase2Preconditions_AlwaysEnabled(replica.acceptor, inp.msg, inp.src)
 }
 
-predicate Replica_Next_Process_2a_Postconditions(replica:LReplica, replica':ReplicaState, inp:CPacket,
-                                                 packets_sent:OutboundPackets)
-  reads replica'.executor.app
+predicate Replica_Next_Process_2a_Postconditions(replica:ReplicaState, replica':ReplicaState, inp:CPacket, packets_sent:OutboundPackets)
+  requires Replica_Next_Process_2a_Preconditions(replica, inp)
 {
-  && CPacketIsAbstractable(inp)
-  && inp.msg.CMessage_2a?
   && Replica_Common_Postconditions(replica, replica', inp, packets_sent)
   && LReplicaNextProcess2a(
-      replica,
+      AbstractifyReplicaStateToLReplica(replica),
       AbstractifyReplicaStateToLReplica(replica'),
       AbstractifyCPacketToRslPacket(inp),
       AbstractifyOutboundCPacketsToSeqOfRslPackets(packets_sent))
@@ -256,15 +234,12 @@ predicate Replica_Next_Process_2b_Preconditions(replica:ReplicaState, inp:CPacke
   && LearnerState_Process2b__Preconditions(replica.learner, replica.executor, inp)
 }
 
-predicate Replica_Next_Process_2b_Postconditions(replica:LReplica, replica':ReplicaState, inp:CPacket,
-                                                 packets_sent:OutboundPackets)
-  reads replica'.executor.app
+predicate Replica_Next_Process_2b_Postconditions(replica:ReplicaState, replica':ReplicaState, inp:CPacket, packets_sent:OutboundPackets)
+  requires Replica_Next_Process_2b_Preconditions(replica, inp)
 {
-  && CPacketIsAbstractable(inp)
-  && inp.msg.CMessage_2b?
   && Replica_Common_Postconditions(replica, replica', inp, packets_sent)
   && LReplicaNextProcess2b(
-      replica,
+      AbstractifyReplicaStateToLReplica(replica),
       AbstractifyReplicaStateToLReplica(replica'),
       AbstractifyCPacketToRslPacket(inp),
       AbstractifyOutboundCPacketsToSeqOfRslPackets(packets_sent))
@@ -275,12 +250,12 @@ predicate Replica_Next_MaybeEnterNewViewAndSend1a_Preconditions(replica:ReplicaS
   ReplicaStateIsValid(replica)
 }
 
-predicate Replica_Next_MaybeEnterNewViewAndSend1a_Postconditions(replica:LReplica, replica':ReplicaState, packets_sent:OutboundPackets)
-  reads replica'.executor.app
+predicate Replica_Next_MaybeEnterNewViewAndSend1a_Postconditions(replica:ReplicaState, replica':ReplicaState, packets_sent:OutboundPackets)
+  requires Replica_Next_MaybeEnterNewViewAndSend1a_Preconditions(replica)
 {
   && Replica_Common_Postconditions_NoPacket(replica, replica', packets_sent)
   && LReplicaNextSpontaneousMaybeEnterNewViewAndSend1a(
-      replica,
+      AbstractifyReplicaStateToLReplica(replica),
       AbstractifyReplicaStateToLReplica(replica'),
       AbstractifyOutboundCPacketsToSeqOfRslPackets(packets_sent))
 }
@@ -290,12 +265,12 @@ predicate Replica_Next_MaybeEnterPhase2_Preconditions(replica:ReplicaState)
   ReplicaStateIsValid(replica)
 }
 
-predicate Replica_Next_MaybeEnterPhase2_Postconditions(replica:LReplica, replica':ReplicaState, packets_sent:OutboundPackets)
-  reads replica'.executor.app
+predicate Replica_Next_MaybeEnterPhase2_Postconditions(replica:ReplicaState, replica':ReplicaState, packets_sent:OutboundPackets)
+  requires Replica_Next_MaybeEnterPhase2_Preconditions(replica)
 {
   && Replica_Common_Postconditions_NoPacket(replica, replica', packets_sent)
   && LReplicaNextSpontaneousMaybeEnterPhase2(
-      replica,
+      AbstractifyReplicaStateToLReplica(replica),
       AbstractifyReplicaStateToLReplica(replica'),
       AbstractifyOutboundCPacketsToSeqOfRslPackets(packets_sent))
 }
@@ -305,17 +280,12 @@ predicate Replica_Next_ReadClock_MaybeNominateValueAndSend2a_Preconditions(repli
   ReplicaStateIsValid(replica)
 }
 
-predicate Replica_Next_ReadClock_MaybeNominateValueAndSend2a_Postconditions(
-  replica:LReplica,
-  replica':ReplicaState,
-  clock:CClockReading,
-  packets_sent:OutboundPackets
-  )
-  reads replica'.executor.app
+predicate Replica_Next_ReadClock_MaybeNominateValueAndSend2a_Postconditions(replica:ReplicaState, replica':ReplicaState, clock:CClockReading, packets_sent:OutboundPackets)
+  requires Replica_Next_ReadClock_MaybeNominateValueAndSend2a_Preconditions(replica)
 {
   && Replica_Common_Postconditions_NoPacket(replica, replica', packets_sent)
   && LReplicaNextReadClockMaybeNominateValueAndSend2a(
-      replica,
+      AbstractifyReplicaStateToLReplica(replica),
       AbstractifyReplicaStateToLReplica(replica'),
       AbstractifyCClockReadingToClockReading(clock),
       AbstractifyOutboundCPacketsToSeqOfRslPackets(packets_sent))
@@ -324,19 +294,17 @@ predicate Replica_Next_ReadClock_MaybeNominateValueAndSend2a_Postconditions(
 predicate Replica_Next_Process_AppStateRequest_Preconditions(replica:ReplicaState, inp:CPacket)
 {
   && Replica_Common_Preconditions(replica, inp)
+  && AppStateMarshallable(replica.executor.app)
   && CPacketIsAbstractable(inp)
   && inp.msg.CMessage_AppStateRequest?
 }
 
-predicate Replica_Next_Process_AppStateRequest_Postconditions(replica:LReplica, replica':ReplicaState,
-                                                              inp:CPacket, packets_sent:OutboundPackets)
-  reads replica'.executor.app
+predicate Replica_Next_Process_AppStateRequest_Postconditions(replica:ReplicaState, replica':ReplicaState, inp:CPacket, packets_sent:OutboundPackets)
+  requires Replica_Next_Process_AppStateRequest_Preconditions(replica, inp)
 {
-  && CPacketIsAbstractable(inp)
-  && inp.msg.CMessage_AppStateRequest?
   && Replica_Common_Postconditions(replica, replica', inp, packets_sent)
   && LReplicaNextProcessAppStateRequest(
-      replica,
+      AbstractifyReplicaStateToLReplica(replica),
       AbstractifyReplicaStateToLReplica(replica'),
       AbstractifyCPacketToRslPacket(inp),
       AbstractifyOutboundCPacketsToSeqOfRslPackets(packets_sent))
@@ -350,15 +318,12 @@ predicate Replica_Next_Process_Heartbeat_Preconditions(replica:ReplicaState, inp
   && inp.msg.CMessage_Heartbeat?
 }
 
-predicate Replica_Next_Process_Heartbeat_Postconditions(replica:LReplica, replica':ReplicaState,
-                                                        inp:CPacket, clock:uint64, packets_sent:OutboundPackets)
-  reads replica'.executor.app
+predicate Replica_Next_Process_Heartbeat_Postconditions(replica:ReplicaState, replica':ReplicaState, inp:CPacket, clock:uint64, packets_sent:OutboundPackets)
+  requires Replica_Next_Process_Heartbeat_Preconditions(replica, inp)
 {
-  && CPacketIsAbstractable(inp)
-  && inp.msg.CMessage_Heartbeat?
   && Replica_Common_Postconditions(replica, replica', inp, packets_sent)
   && LReplicaNextProcessHeartbeat(
-      replica,
+      AbstractifyReplicaStateToLReplica(replica),
       AbstractifyReplicaStateToLReplica(replica'),
       AbstractifyCPacketToRslPacket(inp),
       clock as int,
@@ -370,17 +335,12 @@ predicate Replica_Next_ReadClock_CheckForViewTimeout_Preconditions(replica:Repli
   ReplicaStateIsValid(replica)
 }
 
-predicate Replica_Next_ReadClock_CheckForViewTimeout_Postconditions(
-  replica:LReplica,
-  replica':ReplicaState,
-  clock:CClockReading,
-  packets_sent:OutboundPackets
-  )
-  reads replica'.executor.app
+predicate Replica_Next_ReadClock_CheckForViewTimeout_Postconditions(replica:ReplicaState, replica':ReplicaState, clock:CClockReading, packets_sent:OutboundPackets)
+  requires Replica_Next_ReadClock_CheckForViewTimeout_Preconditions(replica)
 {
   && Replica_Common_Postconditions_NoPacket(replica, replica', packets_sent)
   && LReplicaNextReadClockCheckForViewTimeout(
-      replica,
+      AbstractifyReplicaStateToLReplica(replica),
       AbstractifyReplicaStateToLReplica(replica'),
       AbstractifyCClockReadingToClockReading(clock),
       AbstractifyOutboundCPacketsToSeqOfRslPackets(packets_sent))
@@ -391,17 +351,12 @@ predicate Replica_Next_ReadClock_CheckForQuorumOfViewSuspicions_Preconditions(re
   ReplicaStateIsValid(replica)
 }
 
-predicate Replica_Next_ReadClock_CheckForQuorumOfViewSuspicions_Postconditions(
-  replica:LReplica,
-  replica':ReplicaState,
-  clock:CClockReading,
-  packets_sent:OutboundPackets
-  )
-  reads replica'.executor.app
+predicate Replica_Next_ReadClock_CheckForQuorumOfViewSuspicions_Postconditions(replica:ReplicaState, replica':ReplicaState, clock:CClockReading, packets_sent:OutboundPackets)
+  requires Replica_Next_ReadClock_CheckForQuorumOfViewSuspicions_Preconditions(replica)
 {
   && Replica_Common_Postconditions_NoPacket(replica, replica', packets_sent)
   && LReplicaNextReadClockCheckForQuorumOfViewSuspicions(
-      replica,
+      AbstractifyReplicaStateToLReplica(replica),
       AbstractifyReplicaStateToLReplica(replica'),
       AbstractifyCClockReadingToClockReading(clock),
       AbstractifyOutboundCPacketsToSeqOfRslPackets(packets_sent))
@@ -414,15 +369,12 @@ predicate Replica_Next_Process_AppStateSupply_Preconditions(replica:ReplicaState
   && LearnerState_ForgetOperationsBefore__Preconditions(replica.learner, inp.msg.opn_state_supply)
 }
 
-predicate Replica_Next_Process_AppStateSupply_Postconditions(replica:LReplica, replica':ReplicaState,
-                                                             inp:CPacket, packets_sent:OutboundPackets)
-  reads replica'.executor.app
+predicate Replica_Next_Process_AppStateSupply_Postconditions(replica:ReplicaState, replica':ReplicaState, inp:CPacket, packets_sent:OutboundPackets)
+  requires Replica_Next_Process_AppStateSupply_Preconditions(replica, inp)
 {
-  && CPacketIsAbstractable(inp)
-  && inp.msg.CMessage_AppStateSupply?
   && Replica_Common_Postconditions(replica, replica', inp, packets_sent)
   && LReplicaNextProcessAppStateSupply(
-      replica,
+      AbstractifyReplicaStateToLReplica(replica),
       AbstractifyReplicaStateToLReplica(replica'),
       AbstractifyCPacketToRslPacket(inp),
       AbstractifyOutboundCPacketsToSeqOfRslPackets(packets_sent))
@@ -433,13 +385,12 @@ predicate Replica_Next_Spontaneous_MaybeExecute_Preconditions(replica:ReplicaSta
   ReplicaStateIsValid(replica)
 }
 
-predicate Replica_Next_Spontaneous_MaybeExecute_Postconditions(replica:LReplica, replica':ReplicaState,
-                                                               packets_sent:OutboundPackets)
-  reads replica'.executor.app
+predicate Replica_Next_Spontaneous_MaybeExecute_Postconditions(replica:ReplicaState, replica':ReplicaState, packets_sent:OutboundPackets)
+  requires Replica_Next_Spontaneous_MaybeExecute_Preconditions(replica)
 {
   && Replica_Common_Postconditions_NoPacket(replica, replica', packets_sent)
   && LReplicaNextSpontaneousMaybeExecute(
-      replica,
+      AbstractifyReplicaStateToLReplica(replica),
       AbstractifyReplicaStateToLReplica(replica'),
       AbstractifyOutboundCPacketsToSeqOfRslPackets(packets_sent))
 }
@@ -449,17 +400,12 @@ predicate Replica_Next_ReadClock_MaybeSendHeartbeat_Preconditions(replica:Replic
   ReplicaStateIsValid(replica)
 }
 
-predicate Replica_Next_ReadClock_MaybeSendHeartbeat_Postconditions(
-  replica:LReplica,
-  replica':ReplicaState,
-  clock:CClockReading,
-  packets_sent:OutboundPackets
-  )
-  reads replica'.executor.app
+predicate Replica_Next_ReadClock_MaybeSendHeartbeat_Postconditions(replica:ReplicaState, replica':ReplicaState, clock:CClockReading, packets_sent:OutboundPackets)
+  requires Replica_Next_ReadClock_MaybeSendHeartbeat_Preconditions(replica)
 {
   && Replica_Common_Postconditions_NoPacket(replica, replica', packets_sent)
   && LReplicaNextReadClockMaybeSendHeartbeat(
-      replica,
+      AbstractifyReplicaStateToLReplica(replica),
       AbstractifyReplicaStateToLReplica(replica'),
       AbstractifyCClockReadingToClockReading(clock),
       AbstractifyOutboundCPacketsToSeqOfRslPackets(packets_sent))
@@ -470,16 +416,12 @@ predicate Replica_Next_Spontaneous_MaybeMakeDecision_Preconditions(replica:Repli
   ReplicaStateIsValid(replica)
 }
 
-predicate Replica_Next_Spontaneous_MaybeMakeDecision_Postconditions(
-  replica:LReplica,
-  replica':ReplicaState,
-  packets_sent:OutboundPackets
-  )
-  reads replica'.executor.app
+predicate Replica_Next_Spontaneous_MaybeMakeDecision_Postconditions(replica:ReplicaState, replica':ReplicaState, packets_sent:OutboundPackets)
+  requires Replica_Next_Spontaneous_MaybeMakeDecision_Preconditions(replica)
 {
   && Replica_Common_Postconditions_NoPacket(replica, replica', packets_sent)
   && LReplicaNextSpontaneousMaybeMakeDecision(
-      replica,
+      AbstractifyReplicaStateToLReplica(replica),
       AbstractifyReplicaStateToLReplica(replica'),
       AbstractifyOutboundCPacketsToSeqOfRslPackets(packets_sent))
 }
@@ -489,16 +431,12 @@ predicate Replica_Next_Spontaneous_TruncateLogBasedOnCheckpoints_Preconditions(r
   ReplicaStateIsValid(replica)
 }
 
-predicate Replica_Next_Spontaneous_TruncateLogBasedOnCheckpoints_Postconditions(
-  replica:LReplica,
-  replica':ReplicaState,
-  packets_sent:OutboundPackets
-  )
-  reads replica'.executor.app
+predicate Replica_Next_Spontaneous_TruncateLogBasedOnCheckpoints_Postconditions(replica:ReplicaState, replica':ReplicaState, packets_sent:OutboundPackets)
+  requires Replica_Next_Spontaneous_TruncateLogBasedOnCheckpoints_Preconditions(replica)
 {
   && Replica_Common_Postconditions_NoPacket(replica, replica', packets_sent)
   && LReplicaNextSpontaneousTruncateLogBasedOnCheckpoints(
-      replica,
+      AbstractifyReplicaStateToLReplica(replica),
       AbstractifyReplicaStateToLReplica(replica'),
       AbstractifyOutboundCPacketsToSeqOfRslPackets(packets_sent))
 }

@@ -19,11 +19,11 @@ import opened CommonProof__Actions_i
 import opened CommonProof__PacketSending_i
 import opened CommonProof__Environment_i
 import opened CommonProof__Message2b_i
-import opened CommonProof__MaxBallot_i
+import opened CommonProof__max_bal_i
 import opened Environment_s
 import opened Temporal__Temporal_s
 
-lemma lemma_1bMessageImplicationsForAcceptorState(
+lemma lemma_1bMessageImplicationsForCAcceptor(
   b:Behavior<RslState>,
   c:LConstants,
   i:int,
@@ -63,7 +63,7 @@ lemma lemma_1bMessageImplicationsForAcceptorState(
 
   if p in b[i-1].environment.sentPackets
   {
-    acceptor_idx := lemma_1bMessageImplicationsForAcceptorState(b, c, i-1, opn, p);
+    acceptor_idx := lemma_1bMessageImplicationsForCAcceptor(b, c, i-1, opn, p);
     var s := b[i-1].replicas[acceptor_idx].replica.acceptor;
     var s' := b[i].replicas[acceptor_idx].replica.acceptor;
 
@@ -140,7 +140,7 @@ lemma lemma_1bMessageWithoutOpnImplicationsFor2b(
     }
     else
     {
-      var acceptor_idx := lemma_1bMessageImplicationsForAcceptorState(b, c, i-1, opn, p_1b);
+      var acceptor_idx := lemma_1bMessageImplicationsForCAcceptor(b, c, i-1, opn, p_1b);
       var acceptor_idx_alt, ios := lemma_ActionThatSends2bIsProcess2a(b[i-1], b[i], p_2b);
       assert ReplicasDistinct(c.config.replica_ids, acceptor_idx, acceptor_idx_alt);
     }
@@ -149,7 +149,7 @@ lemma lemma_1bMessageWithoutOpnImplicationsFor2b(
     {
       if p_2b in b[i-1].environment.sentPackets
       {
-        var acceptor_idx := lemma_2bMessageImplicationsForAcceptorState(b, c, i-1, p_2b);
+        var acceptor_idx := lemma_2bMessageImplicationsForCAcceptor(b, c, i-1, p_2b);
         var acceptor_idx_alt, ios := lemma_ActionThatSends1bIsProcess1a(b[i-1], b[i], p_1b);
         assert ReplicasDistinct(c.config.replica_ids, acceptor_idx, acceptor_idx_alt);
       }
@@ -203,7 +203,7 @@ lemma lemma_1bMessageWithOpnImplicationsFor2b(
     }
     else
     {
-      var acceptor_idx := lemma_1bMessageImplicationsForAcceptorState(b, c, i-1, opn, p_1b);
+      var acceptor_idx := lemma_1bMessageImplicationsForCAcceptor(b, c, i-1, opn, p_1b);
       var acceptor_idx_alt, ios := lemma_ActionThatSends2bIsProcess2a(b[i-1], b[i], p_2b);
       assert ReplicasDistinct(c.config.replica_ids, acceptor_idx, acceptor_idx_alt);
     }
@@ -212,7 +212,7 @@ lemma lemma_1bMessageWithOpnImplicationsFor2b(
   {
     if p_2b in b[i-1].environment.sentPackets
     {
-      var acceptor_idx := lemma_2bMessageImplicationsForAcceptorState(b, c, i-1, p_2b);
+      var acceptor_idx := lemma_2bMessageImplicationsForCAcceptor(b, c, i-1, p_2b);
       var acceptor_idx_alt, ios := lemma_ActionThatSends1bIsProcess1a(b[i-1], b[i], p_1b);
       assert ReplicasDistinct(c.config.replica_ids, acceptor_idx, acceptor_idx_alt);
     }

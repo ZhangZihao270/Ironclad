@@ -22,7 +22,7 @@ import opened SHT__Network_i
 import opened SHT__Host_i
 import opened Impl_Parameters_i
 import opened AppInterface_i`All
-import opened Common__NetClient_i
+import opened Common__UdpClient_i
 
 ////////////////////////////////////////////////////////////////////
 //    Grammars for the basic types
@@ -31,7 +31,7 @@ function method OptionalValue_grammar() : G { GTaggedUnion([Value_grammar(), GTu
 function method KeyPlus_grammar() : G { GTaggedUnion([Key_grammar(), GUint64]) }
 function method KeyRange_grammar() : G { GTuple([KeyPlus_grammar(), KeyPlus_grammar()]) }
 function method Hashtable_grammar() : G { GArray(GTuple([Key_grammar(), Value_grammar()])) }
-function method EndPoint_grammar() : G { GByteArray }
+function method EndPoint_grammar() : G { GUint64 }
 
 ////////////////////////////////////////////////////////////////////
 //    Grammars for the SHT messages 
@@ -57,7 +57,7 @@ function method CSingleMessage_grammar() : G {
                     GUint64])                                                   // Ack
 }
 
-predicate NetPacketBound(data:seq<byte>) 
+predicate UdpPacketBound(data:seq<byte>) 
 {
     |data| < MaxPacketSize()
 }
@@ -141,7 +141,10 @@ function method parse_EndPoint(val:V) : EndPoint
     requires ValInGrammar(val, EndPoint_grammar());
     ensures  EndPointIsAbstractable(parse_EndPoint(val));
 {
-    EndPoint(val.b)
+    if val.u <= 0xffffffffffff then
+        ConvertUint64ToEndPoint(val.u)
+    else
+        EndPoint([0,0,0,0], 0)
 }
 
 function method parse_Message_GetRequest(val:V) : CMessage
@@ -221,16 +224,11 @@ function method {:fuel ValidVal,2} parse_CSingleMessage(val:V) : CSingleMessage
         CAck(val.val.u)
 }
 
-function SHTDemarshallData(data:seq<byte>) : (result:CSingleMessage)
-  ensures result.CSingleMessage? ==> EndPointIsValidPublicKey(result.dst)
+function SHTDemarshallData(data:seq<byte>) : CSingleMessage
 {
     if Demarshallable(data, CSingleMessage_grammar()) then
-      var val := DemarshallFunc(data, CSingleMessage_grammar());
-      var result := parse_CSingleMessage(val);
-      if result.CSingleMessage? && !EndPointIsValidPublicKey(result.dst) then
-        CInvalidMessage()
-      else
-        result
+    var val := DemarshallFunc(data, CSingleMessage_grammar());
+    parse_CSingleMessage(val)
     else
         CInvalidMessage()
 }
@@ -248,9 +246,7 @@ method SHTDemarshallDataMethod(data:array<byte>) returns (msg:CSingleMessage)
     if success {
         assert ValInGrammar(val, CSingleMessage_grammar());
         msg := parse_CSingleMessage(val);
-        if msg.CSingleMessage? && !EndPointIsValidPublicKey(msg.dst) {
-          msg := CInvalidMessage();
-        }
+        assert !msg.CInvalidMessage?;
     } else {
         msg := CInvalidMessage();
     }
@@ -289,14 +285,14 @@ predicate MessageMarshallable(msg:CMessage)
         case CGetRequest(k) => ValidKey(k)
         case CSetRequest(k, v) => ValidKey(k) && ValidOptionalValue(v) 
         case CReply(k, v) => ValidKey(k) && ValidOptionalValue(v) 
-        case CRedirect(k, id) => ValidKey(k) && EndPointIsValidPublicKey(id)
-        case CShard(kr, id) => ValidKeyRange(kr) && EndPointIsValidPublicKey(id) && !EmptyKeyRange(msg.kr)
+        case CRedirect(k, id) => ValidKey(k) && EndPointIsAbstractable(id)
+        case CShard(kr, id) => ValidKeyRange(kr) && EndPointIsAbstractable(id) && !EmptyKeyRange(msg.kr)
         case CDelegate(kr, h) => ValidKeyRange(kr) && ValidHashtable(h) && !EmptyKeyRange(msg.range)
 }
 
 predicate CSingleMessageMarshallable(msg:CSingleMessage) 
 {
-    msg.CAck? || (msg.CSingleMessage? && EndPointIsValidPublicKey(msg.dst) && MessageMarshallable(msg.m))
+    msg.CAck? || (msg.CSingleMessage? && EndPointIsAbstractable(msg.dst) && MessageMarshallable(msg.m))
 }
 
 method IsValidKeyPlus(kp:KeyPlus) returns (b:bool)
@@ -386,10 +382,10 @@ method IsMessageMarshallable(msg:CMessage) returns (b:bool)
             }
         case CRedirect(k, id) => 
             b := IsKeyValid(k);
-            b := b && (|id.public_key| < 0x10_0000);
+            b := b && (|id.addr| as uint64 == 4 && 0 <= id.port <= 65535);
         case CShard(kr, id) => 
             b := IsValidKeyRange(kr);
-            b := b && (|id.public_key| < 0x10_0000);
+            b := b && (|id.addr| as uint64 == 4 && 0 <= id.port <= 65535);
             if b {
                 b := IsEmptyKeyRange(kr);
                 b := !b;
@@ -417,7 +413,7 @@ method IsCSingleMessageMarshallable(msg:CSingleMessage) returns (b:bool)
     } else {
         assert msg.CSingleMessage?;
 
-        if !(|msg.dst.public_key| < 0x10_0000) {
+        if !(|msg.dst.addr| as uint64 == 4 && 0 <= msg.dst.port <= 65535) {
             b := false;
             return;
         }
@@ -584,13 +580,13 @@ method MarshallHashtable(c:Hashtable) returns (val:V)
 }
 
 method MarshallEndPoint(c:EndPoint) returns (val:V)
-    requires EndPointIsValidPublicKey(c)
-    ensures  ValInGrammar(val, EndPoint_grammar())
-    ensures  ValidVal(val)
-    ensures  parse_EndPoint(val) == c
-    ensures  0 <= SizeOfV(val) < 0x10_0008
+    requires EndPointIsAbstractable(c);
+    ensures  ValInGrammar(val, EndPoint_grammar());
+    ensures  ValidVal(val);
+    ensures  parse_EndPoint(val) == c;
 {
-    val := VByteArray(c.public_key);
+    val := VUint64(ConvertEndPointToUint64(c));
+    Uint64EndPointRelationships();
 }
 
 method MarshallMessage_GetRequest(c:CMessage) returns (val:V)
@@ -599,7 +595,7 @@ method MarshallMessage_GetRequest(c:CMessage) returns (val:V)
     ensures  ValInGrammar(val, CMessage_GetRequest_grammar());
     ensures  ValidVal(val);
     ensures  parse_Message_GetRequest(val) == c;
-    ensures  0 <= SizeOfV(val) < MaxPacketSize() - 0x10_0020;
+    ensures  0 <= SizeOfV(val) < MaxPacketSize() - 32;
 {
     val := MarshallKey(c.k_getrequest);
 }
@@ -610,7 +606,7 @@ method MarshallMessage_SetRequest(c:CMessage) returns (val:V)
     ensures  ValInGrammar(val, CMessage_SetRequest_grammar());
     ensures  ValidVal(val);
     ensures  parse_Message_SetRequest(val) == c;
-    ensures  0 <= SizeOfV(val) < MaxPacketSize() - 0x10_0020;
+    ensures  0 <= SizeOfV(val) < MaxPacketSize() - 32;
 {
     var k_setrequest := MarshallKey(c.k_setrequest);
     var v_setrequest := MarshallOptionalValue(c.v_setrequest);
@@ -624,7 +620,7 @@ method MarshallMessage_Reply(c:CMessage) returns (val:V)
     ensures  ValInGrammar(val, CMessage_Reply_grammar());
     ensures  ValidVal(val);
     ensures  parse_Message_Reply(val) == c;
-    ensures  0 <= SizeOfV(val) < MaxPacketSize() - 0x10_0020;
+    ensures  0 <= SizeOfV(val) < MaxPacketSize() - 32;
 {
     var k_reply := MarshallKey(c.k_reply);
     var v := MarshallOptionalValue(c.v);
@@ -638,7 +634,7 @@ method MarshallMessage_Redirect(c:CMessage) returns (val:V)
     ensures  ValInGrammar(val, CMessage_Redirect_grammar());
     ensures  ValidVal(val);
     ensures  parse_Message_Redirect(val) == c;
-    ensures  0 <= SizeOfV(val) < MaxPacketSize() - 0x10_0020;
+    ensures  0 <= SizeOfV(val) < MaxPacketSize() - 32;
 {
     var k_redirect := MarshallKey(c.k_redirect);
     var ep := MarshallEndPoint(c.id);
@@ -652,7 +648,7 @@ method MarshallMessage_Shard(c:CMessage) returns (val:V)
     ensures  ValInGrammar(val, CMessage_Shard_grammar());
     ensures  ValidVal(val);
     ensures  parse_Message_Shard(val) == c;
-    ensures  0 <= SizeOfV(val) < MaxPacketSize() - 0x10_0020;
+    ensures  0 <= SizeOfV(val) < MaxPacketSize() - 32;
 {
     var k_redirect := MarshallKeyRange(c.kr);
     var ep := MarshallEndPoint(c.recipient);
@@ -666,7 +662,7 @@ method MarshallMessage_Delegate(c:CMessage) returns (val:V)
     ensures  ValInGrammar(val, CMessage_Delegate_grammar());
     ensures  ValidVal(val);
     ensures  parse_Message_Delegate(val) == c;
-    ensures  0 <= SizeOfV(val) < MaxPacketSize() - 0x10_0020;
+    ensures  0 <= SizeOfV(val) < MaxPacketSize() - 32;
 {
     var range := MarshallKeyRange(c.range);
     var h := MarshallHashtable(c.h);
@@ -685,7 +681,7 @@ method MarshallMessage_Delegate(c:CMessage) returns (val:V)
             { lemma_mul_is_distributive_add_forall(); } 
         (16 + max_key_len()) + (16 + max_key_len()) + 8 + |c.h| * 8 + |c.h| * max_key_len() + |c.h| * 8 + |c.h| * max_val_len();
         <
-        MaxPacketSize() - 0x10_0020;
+        MaxPacketSize() - 32;
     }
 
 }
@@ -695,7 +691,7 @@ method MarshallMessage(c:CMessage) returns (val:V)
     ensures  ValInGrammar(val, CMessage_grammar());
     ensures  ValidVal(val);
     ensures  parse_Message(val) == c;
-    ensures  0 <= SizeOfV(val) < MaxPacketSize() - 0x10_0018;
+    ensures  0 <= SizeOfV(val) < MaxPacketSize() - 24;
 {
     if c.CGetRequest? {
         var msg := MarshallMessage_GetRequest(c);  
@@ -746,6 +742,8 @@ method MarshallCSingleMessage(c:CSingleMessage) returns (val:V)
 ////////////////////////////////////////////////////////////////////////
 
 function AbstractifyBufferToLSHTPacket(src:EndPoint, dst:EndPoint, data:seq<byte>) : LSHTPacket
+    requires EndPointIsValidIPV4(src);
+    requires EndPointIsValidIPV4(dst);
 {
     LPacket(AbstractifyEndPointToNodeIdentity(dst),
            AbstractifyEndPointToNodeIdentity(src),
@@ -756,7 +754,7 @@ predicate BufferRefinementAgreesWithMessageRefinement(msg:CSingleMessage, marsha
     requires CSingleMessageIsAbstractable(msg);
     requires CSingleMessageIsAbstractable(msg);
 {
-    forall src, dst :: (EndPointIsValidPublicKey(src) && EndPointIsValidPublicKey(dst)) ==>
+    forall src, dst :: (EndPointIsValidIPV4(src) && EndPointIsValidIPV4(dst)) ==>
 
             (AbstractifyBufferToLSHTPacket(src, dst, marshalled)
             == LPacket(AbstractifyEndPointToNodeIdentity(dst), AbstractifyEndPointToNodeIdentity(src), AbstractifyCSingleMessageToSingleMessage(msg)))
@@ -769,28 +767,28 @@ function AbstractifyCPacketToLSHTPacket(cp:CPacket) : LSHTPacket
 }
 
 
-function AbstractifyNetPacketToLSHTPacket(net:NetPacket) : LSHTPacket
-    requires NetPacketIsAbstractable(net);
+function AbstractifyUdpPacketToLSHTPacket(udp:UdpPacket) : LSHTPacket
+    requires UdpPacketIsAbstractable(udp);
 {
-    AbstractifyBufferToLSHTPacket(net.src, net.dst, net.msg)
+    AbstractifyBufferToLSHTPacket(udp.src, udp.dst, udp.msg)
 }
 
-function AbstractifyNetPacketToShtPacket(net:NetPacket) : Packet
-    requires NetPacketIsAbstractable(net);
+function AbstractifyUdpPacketToShtPacket(udp:UdpPacket) : Packet
+    requires UdpPacketIsAbstractable(udp);
 {
-    var lp:= AbstractifyNetPacketToLSHTPacket(net);
+    var lp:= AbstractifyUdpPacketToLSHTPacket(udp);
     Packet(lp.dst, lp.src, lp.msg)
 }
 
-predicate NetPacketIsAbstractable(net:NetPacket)
+predicate UdpPacketIsAbstractable(udp:UdpPacket)
 {
-      EndPointIsAbstractable(net.src)
-    && EndPointIsAbstractable(net.dst)
+      EndPointIsValidIPV4(udp.src)
+    && EndPointIsValidIPV4(udp.dst)
 }
 
-predicate NetPacketsIsAbstractable(netps:set<NetPacket>)
+predicate UdpPacketsIsAbstractable(udpps:set<UdpPacket>)
 {
-    forall p :: p in netps ==> NetPacketIsAbstractable(p)
+    forall p :: p in udpps ==> UdpPacketIsAbstractable(p)
 }
 
 lemma lemma_CSingleMessage_grammar_valid()
@@ -817,14 +815,14 @@ method SHTMarshall(msg:CSingleMessage) returns (data:array<byte>)
     requires CSingleMessageIsAbstractable(msg);
     requires CSingleMessageMarshallable(msg);
     ensures fresh(data);
-    ensures NetPacketBound(data[..]);
+    ensures UdpPacketBound(data[..]);
     ensures BufferRefinementAgreesWithMessageRefinement(msg, data[..]);
 {
     var val := MarshallCSingleMessage(msg);
     lemma_CSingleMessage_grammar_valid();
     data := Marshall(val, CSingleMessage_grammar());
 
-    forall src, dst | EndPointIsValidPublicKey(src) && EndPointIsValidPublicKey(dst) 
+    forall src, dst | EndPointIsValidIPV4(src) && EndPointIsValidIPV4(dst) 
         ensures AbstractifyBufferToLSHTPacket(src, 
                                      dst, 
                                      data[..])

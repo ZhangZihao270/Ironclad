@@ -12,7 +12,7 @@ import opened Common__NodeIdentity_i
 import opened SHT__PacketParsing_i
 import opened LiveSHT__SHTRefinement_i
 import opened Impl_Parameters_i
-import opened Common__NetClient_i
+import opened Common__UdpClient_i
 import opened Common__SeqIsUniqueDef_i
 import opened Collections__Seqs_i
 
@@ -24,22 +24,24 @@ datatype SHTConcreteConfiguration = SHTConcreteConfiguration(
 
 predicate SHTConcreteConfigurationIsAbstractable(config:SHTConcreteConfiguration)
 {
-    (forall e :: e in config.hostIds ==> EndPointIsAbstractable(e))
-    && EndPointIsAbstractable(config.rootIdentity)
+    (forall e :: e in config.hostIds ==> EndPointIsValidIPV4(e))
+    && SeqIsUnique(config.hostIds)
+    && EndPointIsValidIPV4(config.rootIdentity)
+    && CParametersIsValid(config.params)
 }
 
 predicate SHTConcreteConfigurationIsValid(config:SHTConcreteConfiguration)
+    ensures SHTConcreteConfigurationIsValid(config) ==> SeqIsUnique(config.hostIds);
 {
        0 < |config.hostIds| < 0xffff_ffff_ffff_ffff
     && SHTConcreteConfigurationIsAbstractable(config)
-    && SeqIsUnique(config.hostIds)
     && CParametersIsValid(config.params)
 }
 
 function method SHTEndPointIsValid(endPoint:EndPoint, config:SHTConcreteConfiguration) : bool
     requires SHTConcreteConfigurationIsValid(config);
 {
-    EndPointIsValidPublicKey(endPoint)
+    EndPointIsValidIPV4(endPoint)
 }
 
 
@@ -62,14 +64,12 @@ predicate ReplicaIndicesValid(indices:seq<uint64>, config:SHTConcreteConfigurati
 lemma lemma_WFSHTConcreteConfiguration(config:SHTConcreteConfiguration)
     ensures SHTConcreteConfigurationIsAbstractable(config)
     && 0 < |config.hostIds|
-    && SeqIsUnique(config.hostIds)
     && config.rootIdentity in config.hostIds
     ==> SHTConcreteConfigurationIsAbstractable(config)
         && WFSHTConfiguration(AbstractifyToConfiguration(config));
 {
     if (SHTConcreteConfigurationIsAbstractable(config)
-        && 0 < |config.hostIds|
-        && SeqIsUnique(config.hostIds))
+        && 0 < |config.hostIds|)
     {
         //lemma_CardinalityNonEmpty(config.hostIds);
         var e := config.hostIds[0];
@@ -103,13 +103,12 @@ predicate WFSHTConcreteConfiguration(config:SHTConcreteConfiguration)
     lemma_WFSHTConcreteConfiguration(config);
        SHTConcreteConfigurationIsAbstractable(config)
     && 0 < |config.hostIds|
-    && SeqIsUnique(config.hostIds)
     && config.rootIdentity in config.hostIds
 }
 
 method CGetReplicaIndex(replica:EndPoint, config:SHTConcreteConfiguration) returns (found:bool, index:uint64)
     requires SHTConcreteConfigurationIsValid(config);
-    requires EndPointIsValidPublicKey(replica);
+    requires EndPointIsValidIPV4(replica);
     ensures  found ==> ReplicaIndexValid(index, config) && config.hostIds[index] == replica;
     ensures  found ==> GetHostIndex(AbstractifyEndPointToNodeIdentity(replica), AbstractifyToConfiguration(config)) == index as int;
     ensures !found ==> !(replica in config.hostIds);

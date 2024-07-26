@@ -19,7 +19,7 @@ import opened SHT__HT_s
 import opened Logic__Option_i
 import opened AbstractServiceSHT_s`All
 import opened SHT__CMessage_i
-import opened Common__NetClient_i
+import opened Common__UdpClient_i
 import opened AppInterface_i`Spec
 import opened Common__NodeIdentity_i
 import opened Impl_Parameters_i
@@ -85,7 +85,7 @@ method InitHostState(constants:ConstantsState, me:EndPoint) returns (host:HostSt
 method DelegateForKeyImpl(m:CDelegationMap, k:Key) returns (ep:EndPoint)
     requires 0<|m.lows|;
      requires CDelegationMapIsValid(m);
-     ensures EndPointIsValidPublicKey(ep);
+     ensures EndPointIsValidIPV4(ep);
      ensures AbstractifyCDelegationMapToDelegationMap(m)[k] == AbstractifyEndPointToNodeIdentity(ep);
      ensures AbstractifyEndPointToNodeIdentity(ep) == DelegateForKey(AbstractifyCDelegationMapToDelegationMap(m), k);
 {
@@ -235,8 +235,7 @@ predicate HostIgnoringUnParseable(host:Host, host':Host, packets:set<Packet>)
  && host.receivedPacket.v.msg.SingleMessage? 
  && host.receivedPacket.v.msg.m.Delegate?
  && var msg := host.receivedPacket.v.msg.m;
-   !(ValidKeyRange(msg.range) && ValidHashtable(msg.h) && !EmptyKeyRange(msg.range)
-    && ValidPhysicalAddress(host.receivedPacket.v.msg.dst))
+    !(ValidKeyRange(msg.range) && ValidHashtable(msg.h) && !EmptyKeyRange(msg.range))
 }
 
 method {:timeLimitMultiplier 4} HostModelNextDelegate(host:HostState, cpacket:CPacket) returns (host':HostState, sent_packets:seq<CPacket>)
@@ -457,7 +456,7 @@ method {:timeLimitMultiplier 2} HostModelSpontaneouslyRetransmit(host:HostState)
     ghost var sent_packets' := AbstractifyOutboundPacketsToSeqOfLSHTPackets(sent_packets);
     
     lemma_AbstractifyEndPointToNodeIdentity_injective_forall();
-    assert forall p :: p in sent_packets ==> CPacketIsAbstractable(p) && EndPointIsAbstractable(p.dst) && EndPointIsAbstractable(p.src);
+    assert forall p :: p in sent_packets ==> CPacketIsAbstractable(p) && EndPointIsValidIPV4(p.dst) && EndPointIsValidIPV4(p.src);
     assert forall p :: p in sent_packets ==> LPacket(AbstractifyEndPointToNodeIdentity(p.dst), AbstractifyEndPointToNodeIdentity(p.src), AbstractifyCSingleMessageToSingleMessage(p.msg)) in sent_packets';
     
     assert forall p':: p' in sent_packets' ==> exists p :: p in sent_packets && LPacket(AbstractifyEndPointToNodeIdentity(p.dst), AbstractifyEndPointToNodeIdentity(p.src), AbstractifyCSingleMessageToSingleMessage(p.msg)) == p';

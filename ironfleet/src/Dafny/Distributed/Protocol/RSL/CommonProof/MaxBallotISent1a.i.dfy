@@ -4,7 +4,7 @@ include "Constants.i.dfy"
 include "Actions.i.dfy"
 include "PacketSending.i.dfy"
 
-module CommonProof__MaxBallotISent1a_i {
+module CommonProof__max_balISent1a_i {
 import opened LiveRSL__Constants_i
 import opened LiveRSL__DistributedSystem_i
 import opened LiveRSL__Environment_i
@@ -27,7 +27,7 @@ predicate PrimaryHasReachedState2OfBallot(
      && (bal == s.max_ballot_i_sent_1a ==> s.current_state != 1)
 }
 
-lemma lemma_MaxBallotISent1aMonotonicOneStep(
+lemma lemma_max_balISent1aMonotonicOneStep(
   b:Behavior<RslState>,
   c:LConstants,
   i:int,
@@ -46,7 +46,7 @@ lemma lemma_MaxBallotISent1aMonotonicOneStep(
   lemma_ConstantsAllConsistent(b, c, i+1);
 }
 
-lemma lemma_MaxBallotISent1aMonotonic(
+lemma lemma_max_balISent1aMonotonic(
   b:Behavior<RslState>,
   c:LConstants,
   i:int,
@@ -67,12 +67,12 @@ lemma lemma_MaxBallotISent1aMonotonic(
     lemma_ReplicaConstantsAllConsistent(b, c, i, idx);
     lemma_ReplicaConstantsAllConsistent(b, c, j-1, idx);
     lemma_ReplicaConstantsAllConsistent(b, c, j, idx);
-    lemma_MaxBallotISent1aMonotonic(b, c, i, j-1, idx);
-    lemma_MaxBallotISent1aMonotonicOneStep(b, c, j-1, idx);
+    lemma_max_balISent1aMonotonic(b, c, i, j-1, idx);
+    lemma_max_balISent1aMonotonicOneStep(b, c, j-1, idx);
   }
 }
 
-lemma lemma_MaxBallotISent1aHasMeAsProposer(
+lemma lemma_max_balISent1aHasMeAsProposer(
   b:Behavior<RslState>,
   c:LConstants,
   i:int,
@@ -89,7 +89,7 @@ lemma lemma_MaxBallotISent1aHasMeAsProposer(
   {
     lemma_ConstantsAllConsistent(b, c, i-1);
     lemma_ConstantsAllConsistent(b, c, i);
-    lemma_MaxBallotISent1aHasMeAsProposer(b, c, i-1, idx);
+    lemma_max_balISent1aHasMeAsProposer(b, c, i-1, idx);
 
     if b[i].replicas[idx].replica.proposer.max_ballot_i_sent_1a != b[i-1].replicas[idx].replica.proposer.max_ballot_i_sent_1a
     {
@@ -109,10 +109,10 @@ lemma lemma_PrimaryHasReachedState2OfBallotMaintainedByOneStep(
   requires PrimaryHasReachedState2OfBallot(b[i], bal)
   ensures  PrimaryHasReachedState2OfBallot(b[i+1], bal)
 {
-  lemma_MaxBallotISent1aMonotonicOneStep(b, c, i, bal.proposer_id);
+  lemma_max_balISent1aMonotonicOneStep(b, c, i, bal.proposer_id);
 }
 
-lemma lemma_Message1aLeqMaxBallotSenderSent1a(
+lemma lemma_Message1aLeqmax_balSenderSent1a(
   b:Behavior<RslState>,
   c:LConstants,
   i:int,
@@ -137,18 +137,18 @@ lemma lemma_Message1aLeqMaxBallotSenderSent1a(
 
     if p in b[i-1].environment.sentPackets
     {
-      lemma_Message1aLeqMaxBallotSenderSent1a(b, c, i-1, p);
-      lemma_MaxBallotISent1aMonotonicOneStep(b, c, i-1, p.msg.bal_1a.proposer_id);
+      lemma_Message1aLeqmax_balSenderSent1a(b, c, i-1, p);
+      lemma_max_balISent1aMonotonicOneStep(b, c, i-1, p.msg.bal_1a.proposer_id);
     }
     else
     {
       var idx, ios := lemma_ActionThatSends1aIsMaybeEnterNewViewAndSend1a(b[i-1], b[i], p);
-      lemma_MaxBallotISent1aHasMeAsProposer(b, c, i-1, idx);
+      lemma_max_balISent1aHasMeAsProposer(b, c, i-1, idx);
     }
   }
 }
 
-lemma lemma_MessageStartingPhase2LeqMaxBallotSenderSent1a(
+lemma lemma_MessageStartingPhase2Leqmax_balSenderSent1a(
   b:Behavior<RslState>,
   c:LConstants,
   i:int,
@@ -173,18 +173,18 @@ lemma lemma_MessageStartingPhase2LeqMaxBallotSenderSent1a(
 
     if p in b[i-1].environment.sentPackets
     {
-      lemma_MessageStartingPhase2LeqMaxBallotSenderSent1a(b, c, i-1, p);
-      lemma_MaxBallotISent1aMonotonicOneStep(b, c, i-1, p.msg.bal_2.proposer_id);
+      lemma_MessageStartingPhase2Leqmax_balSenderSent1a(b, c, i-1, p);
+      lemma_max_balISent1aMonotonicOneStep(b, c, i-1, p.msg.bal_2.proposer_id);
     }
     else
     {
       var idx, ios := lemma_ActionThatSendsStartingPhase2IsMaybeEnterPhase2(b[i-1], b[i], p);
-      lemma_MaxBallotISent1aHasMeAsProposer(b, c, i-1, idx);
+      lemma_max_balISent1aHasMeAsProposer(b, c, i-1, idx);
     }
   }
 }
 
-lemma lemma_Message2aLeqMaxBallotSenderSent1a(
+lemma lemma_Message2aLeqmax_balSenderSent1a(
   b:Behavior<RslState>,
   c:LConstants,
   i:int,
@@ -209,13 +209,13 @@ lemma lemma_Message2aLeqMaxBallotSenderSent1a(
 
     if p in b[i-1].environment.sentPackets
     {
-      lemma_Message2aLeqMaxBallotSenderSent1a(b, c, i-1, p);
-      lemma_MaxBallotISent1aMonotonicOneStep(b, c, i-1, p.msg.bal_2a.proposer_id);
+      lemma_Message2aLeqmax_balSenderSent1a(b, c, i-1, p);
+      lemma_max_balISent1aMonotonicOneStep(b, c, i-1, p.msg.bal_2a.proposer_id);
     }
     else
     {
       var idx, ios := lemma_ActionThatSends2aIsMaybeNominateValueAndSend2a(b[i-1], b[i], p);
-      lemma_MaxBallotISent1aHasMeAsProposer(b, c, i-1, idx);
+      lemma_max_balISent1aHasMeAsProposer(b, c, i-1, idx);
     }
   }
 }
@@ -234,7 +234,7 @@ lemma lemma_Message2aShowsPrimaryReachedState2(
   ensures  PrimaryHasReachedState2OfBallot(b[i], p.msg.bal_2a)
   decreases i
 {
-  lemma_Message2aLeqMaxBallotSenderSent1a(b, c, i, p);
+  lemma_Message2aLeqmax_balSenderSent1a(b, c, i, p);
 
   if i > 0
   {
@@ -250,7 +250,7 @@ lemma lemma_Message2aShowsPrimaryReachedState2(
     else
     {
       var idx, ios := lemma_ActionThatSends2aIsMaybeNominateValueAndSend2a(b[i-1], b[i], p);
-      lemma_MaxBallotISent1aHasMeAsProposer(b, c, i-1, idx);
+      lemma_max_balISent1aHasMeAsProposer(b, c, i-1, idx);
     }
   }
 }
@@ -289,7 +289,7 @@ lemma lemma_Message2bShowsPrimaryReachedState2(
   }
 }
 
-lemma lemma_LearnerMaxBallotSeenShowsPrimaryReachedState2(
+lemma lemma_Learnermax_balSeenShowsPrimaryReachedState2(
   b:Behavior<RslState>,
   c:LConstants,
   i:int,
@@ -312,7 +312,7 @@ lemma lemma_LearnerMaxBallotSeenShowsPrimaryReachedState2(
 
     if max_ballot_seen' == max_ballot_seen
     {
-      lemma_LearnerMaxBallotSeenShowsPrimaryReachedState2(b, c, i-1, learner_idx);
+      lemma_Learnermax_balSeenShowsPrimaryReachedState2(b, c, i-1, learner_idx);
       lemma_PrimaryHasReachedState2OfBallotMaintainedByOneStep(b, c, i-1, max_ballot_seen);
     }
     else
@@ -357,12 +357,12 @@ lemma lemma_ExecutorNextOpToExecuteBallotShowsPrimaryReachedState2(
     else
     {
       var ios := lemma_ActionThatChangesReplicaIsThatReplicasAction(b, c, i-1, executor_idx);
-      lemma_LearnerMaxBallotSeenShowsPrimaryReachedState2(b, c, i-1, executor_idx);
+      lemma_Learnermax_balSeenShowsPrimaryReachedState2(b, c, i-1, executor_idx);
     }
   }
 }
 
-lemma lemma_Received1bPacketsAreFromMaxBallotISent1a(
+lemma lemma_Received1bPacketsAreFrommax_balISent1a(
   b:Behavior<RslState>,
   c:LConstants,
   i:int,
@@ -383,7 +383,7 @@ lemma lemma_Received1bPacketsAreFromMaxBallotISent1a(
   {
     lemma_ConstantsAllConsistent(b, c, i-1);
     lemma_AssumptionsMakeValidTransition(b, c, i-1);
-    lemma_Received1bPacketsAreFromMaxBallotISent1a(b, c, i-1, idx);
+    lemma_Received1bPacketsAreFrommax_balISent1a(b, c, i-1, idx);
     var s := b[i-1].replicas[idx].replica.proposer;
     var s' := b[i].replicas[idx].replica.proposer;
     forall p | p in s'.received_1b_packets

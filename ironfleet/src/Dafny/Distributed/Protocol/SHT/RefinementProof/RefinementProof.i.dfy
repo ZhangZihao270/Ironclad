@@ -4,7 +4,6 @@ include "Refinement.i.dfy"
 include "InvProof.i.dfy"
 
 module SHT__RefinementProof_i {
-import opened Native__Io_s
 import opened Logic__Option_i
 import opened Collections__Maps2_s
 import opened Collections__Maps2_i
@@ -66,7 +65,7 @@ lemma HostClaimsKey_forces_FindHashTable(s:SHT_State, id:NodeIdentity, k:Key)
 }
 
 
-lemma UniquePacketClaimsKey_forces_FindHashTable(s:SHT_State, k:Key) returns (pkt:Packet)
+ghost method UniquePacketClaimsKey_forces_FindHashTable(s:SHT_State, k:Key) returns (pkt:Packet)
     requires MapComplete(s);
     requires PacketsHaveSaneHeaders(s);
     requires AllDelegationsToKnownHosts(s);
@@ -82,7 +81,7 @@ lemma UniquePacketClaimsKey_forces_FindHashTable(s:SHT_State, k:Key) returns (pk
 }
 
 
-lemma HostClaimsKey_forces_FindHostHashTable(s:SHT_State, k:Key) returns (id:NodeIdentity)
+ghost method HostClaimsKey_forces_FindHostHashTable(s:SHT_State, k:Key) returns (id:NodeIdentity)
     requires Inv(s);
     requires UniqueHostClaimsKey(s, k);
     ensures id in AllHostIdentities(s);
@@ -595,7 +594,7 @@ lemma SetPreservesRefinement_ExpandFindHashTable(s:SHT_State, s':SHT_State, id:N
 }
 
 
-lemma {:timeLimitMultiplier 2} SetPreservesRefinement_HostClaims(s:SHT_State, s':SHT_State, id:NodeIdentity, recv:set<Packet>, out:set<Packet>, rpkt:Packet, ko:Key, sm:SingleMessage<Message>, m:Message)
+lemma SetPreservesRefinement_HostClaims(s:SHT_State, s':SHT_State, id:NodeIdentity, recv:set<Packet>, out:set<Packet>, rpkt:Packet, ko:Key, sm:SingleMessage<Message>, m:Message)
     requires HiddenInv(s) && InvBasics(s);
     requires HiddenInv(s') && InvBasics(s');
     requires SHT_Next(s, s');
@@ -1569,7 +1568,6 @@ lemma {:timeLimitMultiplier 12} Next_Process_Message_Refines(s:SHT_State, s':SHT
         reveal_HiddenRefinement();
         if (   rpkt.msg.m.recipient == h.me 
             || !ValidKeyRange(rpkt.msg.m.kr)
-            || !ValidPhysicalAddress(rpkt.msg.m.recipient)
             || EmptyKeyRange(rpkt.msg.m.kr)
             || rpkt.msg.m.recipient !in h.constants.hostIds
             || !DelegateForKeyRangeIsHost(h.delegationMap, rpkt.msg.m.kr, h.me) 

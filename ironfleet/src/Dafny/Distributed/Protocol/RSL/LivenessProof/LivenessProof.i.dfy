@@ -7,7 +7,7 @@ include "StateTransfer.i.dfy"
 
 module LivenessProof__LivenessProof_i {
 
-import opened AppStateMachine_s
+import opened AppStateMachine_i
 import opened LiveRSL__Constants_i
 import opened LiveRSL__DistributedSystem_i
 import opened LiveRSL__Environment_i
@@ -26,7 +26,7 @@ import opened LivenessProof__StateTransfer_i
 import opened CommonProof__Chosen_i
 import opened CommonProof__Constants_i
 import opened CommonProof__Environment_i
-import opened CommonProof__MaxBallotISent1a_i
+import opened CommonProof__max_balISent1a_i
 import opened CommonProof__Message2a_i
 import opened CommonProof__Message2b_i
 import opened Temporal__Rules_i
@@ -94,7 +94,7 @@ lemma lemma_EventuallyLiveReplicaExecutesClientRequest(
   {
     var proposer_idx := lemma_2aMessageImplicationsForProposerState(b, asp.c, send_2a_next_step, packet_2a_from_quorum);
     assert proposer_idx == h.view.proposer_id;
-    lemma_MaxBallotISent1aMonotonic(b, asp.c, send_2a_next_step, h.start_step, proposer_idx);
+    lemma_max_balISent1aMonotonic(b, asp.c, send_2a_next_step, h.start_step, proposer_idx);
     assert false;
   }
 

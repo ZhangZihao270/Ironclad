@@ -71,7 +71,7 @@ function{:opaque} NoReplicaBeyondViewTemporal(
   stepmap(imap i :: NoReplicaBeyondView(b[i], view))
 }
 
-predicate NoMaxBallotISent1aBeyondView(
+predicate Nomax_balISent1aBeyondView(
   ps:RslState,
   view:Ballot
   )
@@ -79,15 +79,15 @@ predicate NoMaxBallotISent1aBeyondView(
   forall idx :: 0 <= idx < |ps.replicas| ==> BalLeq(ps.replicas[idx].replica.proposer.max_ballot_i_sent_1a, view)
 }
 
-function{:opaque} NoMaxBallotISent1aBeyondViewTemporal(
+function{:opaque} Nomax_balISent1aBeyondViewTemporal(
   b:Behavior<RslState>,
   view:Ballot
   ):temporal
   requires imaptotal(b)
-  ensures  forall i{:trigger sat(i, NoMaxBallotISent1aBeyondViewTemporal(b, view))} ::
-             sat(i, NoMaxBallotISent1aBeyondViewTemporal(b, view)) <==> NoMaxBallotISent1aBeyondView(b[i], view)
+  ensures  forall i{:trigger sat(i, Nomax_balISent1aBeyondViewTemporal(b, view))} ::
+             sat(i, Nomax_balISent1aBeyondViewTemporal(b, view)) <==> Nomax_balISent1aBeyondView(b[i], view)
 {
-  stepmap(imap i :: NoMaxBallotISent1aBeyondView(b[i], view))
+  stepmap(imap i :: Nomax_balISent1aBeyondView(b[i], view))
 }
 
 predicate ObjectInFirstNOfSequence<T>(obj:T, s:seq<T>, n:int)

@@ -1,4 +1,4 @@
-include "ProposerState.i.dfy"
+include "CProposer.i.dfy"
 
 module LiveRSL__ProposerLemmas_i {
 import opened Native__Io_s
@@ -6,7 +6,7 @@ import opened LiveRSL__CMessage_i
 import opened LiveRSL__CMessageRefinements_i
 import opened LiveRSL__CTypes_i
 import opened LiveRSL__Proposer_i
-import opened LiveRSL__ProposerState_i
+import opened LiveRSL__CProposer_i
 import opened Collections__Sets_i
 import opened Common__SeqIsUnique_i
 
@@ -29,7 +29,7 @@ predicate IsAfterLogTruncationPoint(opn:COperationNumber, received_1b_packets:se
 predicate AllAcceptorsHadNoProposal(S:set<CPacket>, opn:COperationNumber)
   requires SetOfMessage1b(S)
 {
-  forall p :: p in S ==> !(opn in p.msg.votes.v)
+  forall p :: p in S ==> !(opn in p.msg.votes)
 }
 
 lemma lemma_AbstractifySetOfCPacketsToSetOfRslPackets_propertiesProposer(cps:set<CPacket>)
@@ -77,7 +77,7 @@ lemma lemma_AbstractifySetOfCPacketsToSetOfRslPackets_propertiesProposer(cps:set
           reveal AbstractifyCVotesToVotes();
           var p :| p in cps && rp == AbstractifyCPacketToRslPacket(p);
           if ref_opn in rp.msg.votes {
-            assert opn in p.msg.votes.v;
+            assert opn in p.msg.votes;
             assert false;
           }
         }
@@ -90,8 +90,8 @@ lemma lemma_AbstractifySetOfCPacketsToSetOfRslPackets_propertiesProposer(cps:set
     {
       var ref_opn := AbstractifyCOperationNumberToOperationNumber(opn);
       if !AllAcceptorsHadNoProposal(cps, opn) {
-        assert !(forall p :: p in cps ==> !(opn in p.msg.votes.v));
-        var p :| p in cps && opn in p.msg.votes.v;
+        assert !(forall p :: p in cps ==> !(opn in p.msg.votes));
+        var p :| p in cps && opn in p.msg.votes;
         var ref_p := AbstractifyCPacketToRslPacket(p);
 
         reveal AbstractifyCVotesToVotes();
@@ -119,7 +119,7 @@ function PacketSrc(pkt:CPacket) : EndPoint
   pkt.src      
 }
 
-lemma lemma_Received1bBound(proposer:ProposerState)
+lemma lemma_Received1bBound(proposer:CProposer)
   requires ProposerIsValid(proposer)
   ensures  |proposer.received_1b_packets| < 0xFFFF_FFFF_FFFF_FFFF
 {

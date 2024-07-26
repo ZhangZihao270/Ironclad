@@ -54,13 +54,22 @@ predicate OnlySentMarshallableData(rawlog:seq<NetEvent>)
 
 datatype ReceiveResult = RRFail() | RRTimeout() | RRPacket(cpacket:CLockPacket)
 
+method GetEndPoint(ipe:IPEndPoint) returns (ep:EndPoint)
+    ensures ep == ipe.EP();
+    ensures EndPointIsValidIPV4(ep);
+{
+    var addr := ipe.GetAddress();
+    var port := ipe.GetPort();
+    ep := EndPoint(addr[..], port);
+}
+
 method Receive(netClient:NetClient, localAddr:EndPoint) 
     returns (rr:ReceiveResult, ghost netEvent:NetEvent)
     requires NetClientIsValid(netClient);
-    requires EndPoint(netClient.MyPublicKey()) == localAddr;
+    requires netClient.LocalEndPoint() == localAddr;
     modifies NetClientRepr(netClient);
     ensures netClient.env == old(netClient.env);
-    ensures netClient.MyPublicKey() == old(netClient.MyPublicKey());
+    ensures netClient.LocalEndPoint() == old(netClient.LocalEndPoint());
     ensures NetClientOk(netClient) <==> !rr.RRFail?;
     ensures old(NetClientRepr(netClient)) == NetClientRepr(netClient);
     ensures !rr.RRFail? ==>
@@ -69,7 +78,7 @@ method Receive(netClient:NetClient, localAddr:EndPoint)
     ensures rr.RRTimeout? ==> netEvent.LIoOpTimeoutReceive?;
     ensures rr.RRPacket? ==>
            netEvent.LIoOpReceive?
-        && EndPointIsValidPublicKey(rr.cpacket.src)
+        && EndPointIsValidIPV4(rr.cpacket.src)
         && AbstractifyCLockPacket(rr.cpacket) == AbstractifyNetPacket(netEvent.r)
         && rr.cpacket.msg == DemarshallData(netEvent.r.msg)
 {
@@ -88,11 +97,11 @@ method Receive(netClient:NetClient, localAddr:EndPoint)
         return;
     }
 
-    var remoteEp:EndPoint := EndPoint(remote);
-    netEvent := LIoOpReceive(LPacket(EndPoint(netClient.MyPublicKey()), remoteEp, buffer[..]));
+    netEvent := LIoOpReceive(LPacket(netClient.LocalEndPoint(), remote.EP(), buffer[..]));
 
     var cmessage := DemarshallDataMethod(buffer);
-    var cpacket := LPacket(localAddr, remoteEp, cmessage);
+    var srcEp := GetEndPoint(remote);
+    var cpacket := LPacket(localAddr, srcEp, cmessage);
     rr := RRPacket(cpacket);
 }
 
@@ -112,13 +121,13 @@ predicate SendLogReflectsPacket(netEventLog:seq<NetEvent>, packet:Option<CLockPa
 
 method SendPacket(netClient:NetClient, opt_packet:Option<CLockPacket>, ghost localAddr:EndPoint) returns (ok:bool, ghost netEventLog:seq<NetEvent>)
     requires NetClientIsValid(netClient);
-    requires EndPoint(netClient.MyPublicKey()) == localAddr;
+    requires netClient.LocalEndPoint() == localAddr;
     requires OptionCLockPacketValid(opt_packet);
     requires opt_packet.Some? ==> opt_packet.v.src == localAddr;
     modifies NetClientRepr(netClient);
     ensures old(NetClientRepr(netClient)) == NetClientRepr(netClient);
     ensures netClient.env == old(netClient.env);
-    ensures netClient.MyPublicKey() == old(netClient.MyPublicKey());
+    ensures netClient.LocalEndPoint() == old(netClient.LocalEndPoint());
     ensures NetClientOk(netClient) <==> ok;
     ensures ok ==> ( NetClientIsValid(netClient)
                   && netClient.IsOpen()
@@ -136,15 +145,19 @@ method SendPacket(netClient:NetClient, opt_packet:Option<CLockPacket>, ghost loc
 
         // Construct the remote address
         var dstEp:EndPoint := cpacket.dst;
+        var dstAddrAry := seqToArrayOpt(dstEp.addr);
+        var remote;
+        ok, remote := IPEndPoint.Construct(dstAddrAry, dstEp.port, netClient.env);
+        if (!ok) { return; }
 
         // Marshall the message
         var buffer := MarshallLockMessage(cpacket.msg);
 
         // Send the packet off
-        ok := netClient.Send(dstEp.public_key, buffer);
+        ok := netClient.Send(remote, buffer);
         if (!ok) { return; }
 
-        ghost var netEvent := LIoOpSend(LPacket(dstEp, EndPoint(netClient.MyPublicKey()), buffer[..]));
+        ghost var netEvent := LIoOpSend(LPacket(remote.EP(), netClient.LocalEndPoint(), buffer[..]));
         netEventLog := [netEvent];
     }
 }

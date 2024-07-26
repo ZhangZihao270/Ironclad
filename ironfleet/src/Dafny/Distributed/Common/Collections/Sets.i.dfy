@@ -50,14 +50,14 @@ predicate Injective<X(!new), Y>(f:X-->Y)
   forall x1, x2 :: f(x1) == f(x2) ==> x1 == x2
 }
 
-predicate InjectiveOver<X, Y>(xs:set<X>, ys:set<Y>, f:X-->Y)
+predicate InjectiveOver<X(!new), Y>(xs:set<X>, ys:set<Y>, f:X-->Y)
   reads f.reads
   requires forall x :: x in xs ==> f.requires(x)
 {
   forall x1, x2 :: x1 in xs && x2 in xs && f(x1) in ys && f(x2) in ys && f(x1) == f(x2) ==> x1 == x2
 }
 
-predicate InjectiveOverSeq<X, Y>(xs:seq<X>, ys:set<Y>, f:X-->Y)
+predicate InjectiveOverSeq<X(!new), Y>(xs:seq<X>, ys:set<Y>, f:X-->Y)
   reads f.reads
   requires forall x :: x in xs ==> f.requires(x)
 {
@@ -155,7 +155,7 @@ function/*TODO:{:opaque}*/ MapSetToSet<X(!new), Y>(xs:set<X>, f:X-->Y):set<Y>
   ys
 }
 
-function/*TODO:{:opaque}*/ MapSetToSetOver<X, Y>(xs:set<X>, f:X-->Y):set<Y>
+function/*TODO:{:opaque}*/ MapSetToSetOver<X(!new), Y>(xs:set<X>, f:X-->Y):set<Y>
   reads f.reads
   requires forall x :: x in xs ==> f.requires(x)
   requires InjectiveOver(xs, set x | x in xs :: f(x), f)

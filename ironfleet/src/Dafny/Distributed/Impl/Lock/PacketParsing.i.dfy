@@ -1,5 +1,5 @@
 include "../Common/GenericMarshalling.i.dfy"
-include "../Common/NetClient.i.dfy"
+include "../Common/UdpClient.i.dfy"
 include "Message.i.dfy"
 
 module PacketParsing_i {
@@ -8,11 +8,11 @@ import opened Native__Io_s
 import opened Logic__Option_i
 import opened Environment_s
 import opened Common__GenericMarshalling_i
-import opened Common__NetClient_i
+import opened Common__UdpClient_i
 import opened Types_i
 import opened Message_i
 
-predicate NetPacketBound(data:seq<byte>) 
+predicate UdpPacketBound(data:seq<byte>) 
 {
     |data| < MaxPacketSize()
 }
@@ -128,7 +128,7 @@ method MarshallMessage(c:CMessage) returns (val:V)
 method MarshallLockMessage(msg:CMessage) returns (data:array<byte>)
     requires !msg.CInvalid?;
     ensures fresh(data);
-    ensures NetPacketBound(data[..]);
+    ensures UdpPacketBound(data[..]);
     ensures DemarshallData(data[..]) == msg;
 {
     var val := MarshallMessage(msg);
@@ -139,15 +139,15 @@ method MarshallLockMessage(msg:CMessage) returns (data:array<byte>)
 //    Packet translation 
 ////////////////////////////////////////////////////////////////////
 
-function AbstractifyNetPacket(net:NetPacket) : LockPacket
+function AbstractifyUdpPacket(udp:UdpPacket) : LockPacket
 {
-    LPacket(net.dst, net.src, AbstractifyCMessage(DemarshallData(net.msg)))
+    LPacket(udp.dst, udp.src, AbstractifyCMessage(DemarshallData(udp.msg)))
 }
 
 predicate CLockPacketValid(p:CLockPacket)
 {
-      EndPointIsValidPublicKey(p.src)
-    && EndPointIsValidPublicKey(p.dst)
+       EndPointIsValidIPV4(p.src)
+    && EndPointIsValidIPV4(p.dst)
     && !p.msg.CInvalid?
 }
 

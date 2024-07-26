@@ -85,7 +85,6 @@ predicate Trigger(i:int)
 
 function method parse_Uint64(data:seq<byte>) : (Option<V>, seq<byte>)
   requires |data| < 0x1_0000_0000_0000_0000
-  ensures  if |data| >= 8 then |parse_Uint64(data).1| == |data| - 8 else |parse_Uint64(data).1| == 0
 {
   if |data| as uint64 >= Uint64Size() then
     (Some(VUint64(SeqByteToUint64(data[..Uint64Size()]))), data[Uint64Size()..])
@@ -1139,7 +1138,7 @@ lemma lemma_parse_Val_view_specific_size(data:seq<byte>, v:V, grammar:G, index:i
   requires ValidGrammar(grammar)
   requires 0 <= index <= |data|
   requires 0 <= index + SizeOfV(v) <= |data|
-  requires index+SizeOfV(v) <= bound <= |data|
+  requires index+SizeOfV(v) <= bound <= |data|;
   requires parse_Val(data[index..bound], grammar).0 == Some(v)
   decreases grammar, 0
   ensures  parse_Val(data[index..index+SizeOfV(v)], grammar).0 == Some(v)
@@ -1201,22 +1200,7 @@ method MarshallUint64(n:uint64, data:array<byte>, index:uint64)
   ensures  forall i :: (index as int) + (Uint64Size() as int) <= i < data.Length ==> data[i] == old(data[i])
 {
   MarshallUint64_guts(n, data, index);
-  calc {
-    parse_Uint64(data[index .. index+Uint64Size()]).0.v.u;
-    (Some(VUint64(SeqByteToUint64(data[index .. index+Uint64Size()][..Uint64Size()]))), data[Uint64Size()..]).0.v.u;
-    SeqByteToUint64(data[index .. index+Uint64Size()][..Uint64Size()]);
-    SeqByteToUint64(data[index .. index+Uint64Size()]);
-    SeqByteToUint64(data[index .. index+(Uint64Size() as uint64)]);
-    n;
-  }
-  calc {
-    parse_Uint64(data[index..]).0.v.u;
-    (Some(VUint64(SeqByteToUint64(data[index..][..Uint64Size()]))), data[Uint64Size()..]).0.v.u;
-    SeqByteToUint64(data[index..][..Uint64Size()]);
-    SeqByteToUint64(data[index .. index+Uint64Size()]);
-    SeqByteToUint64(data[index .. index+(Uint64Size() as uint64)]);
-    n;
-  }
+  var tuple := parse_Uint64(data[index .. ]);
 }
 
 lemma lemma_marshall_array_contents(contents:seq<V>, eltType:G, marshalled_bytes:seq<byte>, trace:seq<seq<byte>>)
@@ -1719,7 +1703,7 @@ method MarshallByteArray(val:V, grammar:G, data:array<byte>, index:uint64) retur
   ghost var len := tuple.0;
   ghost var rest := tuple.1;
   assert{:split_here} true;
-  assert len.v.u == |val.b| as uint64;
+  // assert len.v.u == |val.b| as uint64;
   
   assert rest == data[index + 8..(index as int) + SizeOfV(val)] == val.b;
   assert !len.None? && (len.v.u as int) <= |rest|;

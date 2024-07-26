@@ -7,17 +7,16 @@ module Host_i refines Host_s {
     import opened Collections__Sets_i
     import opened Protocol_Node_i
     import opened NodeImpl_i
-    import opened CmdLineParser_i
     import opened LockCmdLineParser_i
     import opened Types_i
     import opened Impl_Node_i
-    import opened NetLock_i
+    import opened UdpLock_i
     export Spec
         provides Native__Io_s, Environment_s, Native__NativeTypes_s
         provides HostState
         provides ConcreteConfiguration
-        provides HostInit, HostNext, ConcreteConfigInit, HostStateInvariants
-        provides ConcreteConfigToServers, ParseCommandLineConfiguration, ArbitraryObject
+        provides HostInit, HostNext, ConcreteConfigInit, HostStateInvariants, ConcreteConfigurationInvariants
+        provides ParseCommandLineConfiguration, ParseCommandLineId, ArbitraryObject
         provides HostInitImpl, HostNextImpl
     export All reveals *
 
@@ -26,77 +25,78 @@ module Host_i refines Host_s {
     type HostState = CScheduler
     type ConcreteConfiguration = Config
 
+    predicate ConcreteConfigurationInvariants(config:ConcreteConfiguration) 
+    {
+        ValidConfig(config)
+    }
+
     predicate HostStateInvariants(host_state:HostState, env:HostEnvironment)
     {
-      && host_state.node_impl.Valid() 
-      && host_state.node_impl.Env() == env
-      && host_state.node == AbstractifyCNode(host_state.node_impl.node)
+     && host_state.node_impl.Valid() 
+     && host_state.node_impl.Env() == env
+     && host_state.node == AbstractifyCNode(host_state.node_impl.node)
     }
 
     predicate HostInit(host_state:HostState, config:ConcreteConfiguration, id:EndPoint)
     {
-      && host_state.node_impl.Valid()
-      && host_state.node_impl.node.config == config
-      && host_state.node_impl.node.config[host_state.node_impl.node.my_index] == id
-      && NodeInit(host_state.node, 
+     && host_state.node_impl.Valid()
+     && host_state.node_impl.node.config == config
+     && host_state.node_impl.node.config[host_state.node_impl.node.my_index] == id
+     && NodeInit(host_state.node, 
                  host_state.node_impl.node.my_index as int,
                  config)
     }
 
-    predicate {:opaque} HostNext(host_state:HostState, host_state':HostState, ios:seq<LIoOp<EndPoint, seq<byte>>>)
+    predicate HostNext(host_state:HostState, host_state':HostState, ios:seq<LIoOp<EndPoint, seq<byte>>>)
     {
-      && NodeNext(host_state.node, host_state'.node, AbstractifyRawLogToIos(ios))
+         NodeNext(host_state.node, host_state'.node, AbstractifyRawLogToIos(ios))
       && OnlySentMarshallableData(ios)
     }
 
-    predicate ConcreteConfigInit(config:ConcreteConfiguration)
+    predicate ConcreteConfigInit(config:ConcreteConfiguration, servers:set<EndPoint>, clients:set<EndPoint>)
     {
-      ValidConfig(config)
+        ValidConfig(config)
+     && MapSeqToSet(config, x=>x) == servers
     }
 
-    function ConcreteConfigToServers(config:ConcreteConfiguration) : set<EndPoint>
+    function ParseCommandLineConfiguration(args:seq<seq<uint16>>) : (ConcreteConfiguration, set<EndPoint>, set<EndPoint>)
     {
-      MapSeqToSet(config, x=>x)
+        var lock_config := lock_config_parsing(args);
+        var endpoints_set := (set e{:trigger e in lock_config} | e in lock_config);
+        (lock_config, endpoints_set, {})
     }
 
-    function ParseCommandLineConfiguration(args:seq<seq<byte>>) : ConcreteConfiguration
+    function ParseCommandLineId(ip:seq<uint16>, port:seq<uint16>) : EndPoint
     {
-      lock_config_parsing(args)
+        lock_parse_id(ip, port)
     }
     
-    method HostInitImpl(
-      ghost env:HostEnvironment,
-      netc:NetClient,
-      args:seq<seq<byte>>
-      ) returns (
-      ok:bool,
-      host_state:HostState
-      )
+    method HostInitImpl(ghost env:HostEnvironment) returns (ok:bool, host_state:HostState, config:ConcreteConfiguration, ghost servers:set<EndPoint>, ghost clients:set<EndPoint>, id:EndPoint)
     {
         var my_index;
         var node_impl := new NodeImpl();
         host_state := CScheduler(AbstractifyCNode(node_impl.node), node_impl);
 
-        var id := EndPoint(netc.MyPublicKey());
-        var config;
-        ok, config, my_index := ParseCmdLine(id, args);
+        ok, config, my_index := ParseCmdLine(env);
         if !ok { return; }
-        assert id in config;
-
-        ok := node_impl.InitNode(config, my_index, netc, env);
+        id := config[my_index];
+        
+        ok := node_impl.InitNode(config, my_index, env);
         
         if !ok { return; }
         host_state := CScheduler(AbstractifyCNode(node_impl.node), node_impl);
+        servers := set e | e in config;
+        clients := {};
     }
     
-    predicate EventsConsistent(recvs:seq<NetEvent>, clocks:seq<NetEvent>, sends:seq<NetEvent>) 
+    predicate EventsConsistent(recvs:seq<UdpEvent>, clocks:seq<UdpEvent>, sends:seq<UdpEvent>) 
     {
         forall e :: (e in recvs  ==> e.LIoOpReceive?) 
                  && (e in clocks ==> e.LIoOpReadClock? || e.LIoOpTimeoutReceive?) 
                  && (e in sends  ==> e.LIoOpSend?)
     }
 
-    ghost method RemoveRecvs(events:seq<NetEvent>) returns (recvs:seq<NetEvent>, rest:seq<NetEvent>) 
+    ghost method RemoveRecvs(events:seq<UdpEvent>) returns (recvs:seq<UdpEvent>, rest:seq<UdpEvent>) 
         ensures forall e :: e in recvs ==> e.LIoOpReceive?;
         ensures events == recvs + rest;
         ensures rest != [] ==> !rest[0].LIoOpReceive?;
@@ -119,13 +119,13 @@ module Host_i refines Host_s {
         }
     }
 
-    predicate NetEventsReductionCompatible(events:seq<NetEvent>)
+    predicate UdpEventsReductionCompatible(events:seq<UdpEvent>)
     {
         forall i :: 0 <= i < |events| - 1 ==> events[i].LIoOpReceive? || events[i+1].LIoOpSend?
     }
 
-    lemma RemainingEventsAreSends(events:seq<NetEvent>)
-        requires NetEventsReductionCompatible(events);
+    lemma RemainingEventsAreSends(events:seq<UdpEvent>)
+        requires UdpEventsReductionCompatible(events);
         requires |events| > 0;
         requires !events[0].LIoOpReceive?;
         ensures  forall e :: e in events[1..] ==> e.LIoOpSend?;
@@ -137,8 +137,8 @@ module Host_i refines Host_s {
         }
     }
 
-    ghost method PartitionEvents(events:seq<NetEvent>) returns (recvs:seq<NetEvent>, clocks:seq<NetEvent>, sends:seq<NetEvent>)
-        requires NetEventsReductionCompatible(events);
+    ghost method PartitionEvents(events:seq<UdpEvent>) returns (recvs:seq<UdpEvent>, clocks:seq<UdpEvent>, sends:seq<UdpEvent>)
+        requires UdpEventsReductionCompatible(events);
         ensures  events == recvs + clocks + sends;
         ensures  EventsConsistent(recvs, clocks, sends);
         ensures  |clocks| <= 1;
@@ -159,10 +159,10 @@ module Host_i refines Host_s {
         }
     }
 
-    lemma NetEventsRespectReduction(s:Node, s':Node, ios:seq<LockIo>, events:seq<NetEvent>)
+    lemma UdpEventsRespectReduction(s:Node, s':Node, ios:seq<LockIo>, events:seq<UdpEvent>)
         requires LIoOpSeqCompatibleWithReduction(ios);
         requires AbstractifyRawLogToIos(events) == ios;
-        ensures NetEventsReductionCompatible(events);
+        ensures UdpEventsReductionCompatible(events);
     {
         //reveal_AbstractifyRawLogToIos();
         assert AbstractifyRawLogToIos(events) == ios;
@@ -176,15 +176,15 @@ module Host_i refines Host_s {
 
     method HostNextImpl(ghost env:HostEnvironment, host_state:HostState) 
         returns (ok:bool, host_state':HostState, 
-                 ghost recvs:seq<NetEvent>, ghost clocks:seq<NetEvent>, ghost sends:seq<NetEvent>, 
+                 ghost recvs:seq<UdpEvent>, ghost clocks:seq<UdpEvent>, ghost sends:seq<UdpEvent>, 
                  ghost ios:seq<LIoOp<EndPoint, seq<byte>>>)
     {
-        var okay, netEventLog, abstract_ios := host_state.node_impl.HostNextMain();
+        var okay, udpEventLog, abstract_ios := host_state.node_impl.HostNextMain();
         if okay {
-            NetEventsRespectReduction(host_state.node, AbstractifyCNode(host_state.node_impl.node), abstract_ios, netEventLog);
-            recvs, clocks, sends := PartitionEvents(netEventLog);
+            UdpEventsRespectReduction(host_state.node, AbstractifyCNode(host_state.node_impl.node), abstract_ios, udpEventLog);
+            recvs, clocks, sends := PartitionEvents(udpEventLog);
             ios := recvs + clocks + sends; 
-            assert ios == netEventLog;
+            assert ios == udpEventLog;
             host_state' := CScheduler(AbstractifyCNode(host_state.node_impl.node), host_state.node_impl);
         } else {
             recvs := [];
@@ -193,6 +193,5 @@ module Host_i refines Host_s {
             host_state' := host_state;
         }
         ok := okay;
-        reveal_HostNext();
     }
 }

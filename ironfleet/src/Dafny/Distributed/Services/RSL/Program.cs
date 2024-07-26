@@ -27,7 +27,7 @@ namespace IronRSLServer
       privateKeyFileName = "";
       localHostNameOrAddress = "";
       localPort = 0;
-      profile = false;
+      profile = true;
       progress = false;
       verbose = false;
       safeguard = true;

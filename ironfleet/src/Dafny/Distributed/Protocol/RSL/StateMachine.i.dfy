@@ -1,9 +1,9 @@
-include "../../Services/RSL/AppStateMachine.s.dfy"
+include "../../Services/RSL/AppStateMachine.i.dfy"
 include "Types.i.dfy"
     
 module LiveRSL__StateMachine_i {
 
-import opened AppStateMachine_s
+import opened AppStateMachine_i
 import opened LiveRSL__Types_i
 
 function HandleRequest(state:AppState, request:Request) : (AppState, Reply)
@@ -24,6 +24,8 @@ function {:opaque} HandleRequestBatchHidden(state:AppState, batch:RequestBatch) 
     ([state], [])
   else
     var (restStates, restReplies) := HandleRequestBatchHidden(state, batch[..|batch|-1]);
+    // var new_state := 0;
+    // var reply := AppIncrementReply(0);
     var (new_state, reply) := AppHandleRequest(restStates[|restStates|-1], batch[|batch|-1].request);
     (restStates+[new_state], restReplies+[Reply(batch[|batch|-1].client, batch[|batch|-1].seqno, reply)])
 }
@@ -104,16 +106,33 @@ lemma lemma_HandleRequestBatchTriggerHappy(state:AppState, batch:RequestBatch, s
   lemma_HandleRequestBatchHidden(state, batch, states, replies);
 }
 
+// function HandleRequestBatch(state:AppState, batch:RequestBatch) : (seq<AppState>, seq<Reply>)
+// //  ensures var (states, replies) := HandleRequestBatch(state, batch); 
+// //          && states[0] == state
+// //          && |states| == |batch|+1 
+// //          && |replies| == |batch|
+// //          && (forall i :: 0 <= i < |batch| ==>
+// //                   && replies[i].Reply? 
+// //                   && ((states[i+1], replies[i].reply) == AppHandleRequest(states[i], batch[i].request))
+// //                   && replies[i].client == batch[i].client
+// //                   && replies[i].seqno == batch[i].seqno)
+// {
+//    var (states, replies) := HandleRequestBatchHidden(state, batch); 
+//    lemma_HandleRequestBatchHidden(state, batch, states, replies);
+//    (states, replies)
+// }
+
+
 function HandleRequestBatch(state:AppState, batch:RequestBatch) : (seq<AppState>, seq<Reply>)
-//  ensures var (states, replies) := HandleRequestBatch(state, batch); 
-//          && states[0] == state
-//          && |states| == |batch|+1 
-//          && |replies| == |batch|
-//          && (forall i :: 0 <= i < |batch| ==>
-//                   && replies[i].Reply? 
-//                   && ((states[i+1], replies[i].reply) == AppHandleRequest(states[i], batch[i].request))
-//                   && replies[i].client == batch[i].client
-//                   && replies[i].seqno == batch[i].seqno)
+ ensures var (states, replies) := HandleRequestBatch(state, batch); 
+         && states[0] == state
+         && |states| == |batch|+1 
+         && |replies| == |batch|
+         && (forall i :: 0 <= i < |batch| ==>
+                  && replies[i].Reply? 
+                  && ((states[i+1], replies[i].reply) == AppHandleRequest(states[i], batch[i].request))
+                  && replies[i].client == batch[i].client
+                  && replies[i].seqno == batch[i].seqno)
 {
    var (states, replies) := HandleRequestBatchHidden(state, batch); 
    lemma_HandleRequestBatchHidden(state, batch, states, replies);

@@ -13,6 +13,8 @@ import opened LiveRSL__Constants_i
 import opened LiveRSL__Executor_i
 import opened Collections__Maps_i
 
+// 4
+
 datatype LLearner = LLearner(
   constants:LReplicaConstants,
   max_ballot_seen:Ballot,
@@ -55,6 +57,11 @@ predicate LLearnerForgetDecision(s:LLearner, s':LLearner, opn:OperationNumber)
   else
     s' == s
 }
+
+// predicate LLearnerRemoveOperationsBefore(m:LearnerState, m':LearnerState, opn:OperationNumber)
+// {
+//   m' == map op | op in m && op >= opn :: m[op]
+// }
 
 predicate LLearnerForgetOperationsBefore(s:LLearner, s':LLearner, ops_complete:OperationNumber)
 {

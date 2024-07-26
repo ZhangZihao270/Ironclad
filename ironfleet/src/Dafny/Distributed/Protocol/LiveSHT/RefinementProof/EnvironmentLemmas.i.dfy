@@ -12,13 +12,6 @@ lemma Lemma_EffectOnLSHTEnvironmentRefinementOfAddingPackets(e:LSHTEnvironment, 
 {
 }
 
-lemma Lemma_LSHTIoSeq_RefineAsSendsEmptyHelper<T>(x: T, s1: set<T>, s2: set<T>)
-  requires x in s1
-  requires x !in s2
-  ensures  s1 != s2
-{
-}
-
 lemma Lemma_LSHTIoSeq_RefineAsSendsEmpty(ios:seq<LSHTIo>)
     requires (set io | io in ios && io.LIoOpSend? :: io.s) == {};
     ensures LSHTIoSeq_RefineAsSends(ios) == {};
@@ -28,7 +21,6 @@ lemma Lemma_LSHTIoSeq_RefineAsSendsEmpty(ios:seq<LSHTIo>)
     {
         var io' :| io' in ios && io'.LIoOpSend?;
         assert io'.s in (set io | io in ios && io.LIoOpSend? :: io.s);
-        Lemma_LSHTIoSeq_RefineAsSendsEmptyHelper(io'.s, set io | io in ios && io.LIoOpSend? :: io.s, {});
         assert false;
     }
 }

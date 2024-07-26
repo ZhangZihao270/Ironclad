@@ -31,7 +31,9 @@ predicate ReplyCacheObjectInv(cache:ReplyCache, client:NodeIdentity)
 
 predicate ReplyCacheStateInv(ps:RslState, client:NodeIdentity)
 {
-  forall idx :: 0 <= idx < |ps.replicas| ==> ReplyCacheObjectInv(ps.replicas[idx].replica.executor.reply_cache, client)
+  && (forall p :: p in ps.environment.sentPackets && p.src in ps.constants.config.replica_ids && p.msg.RslMessage_AppStateSupply? ==>
+           ReplyCacheObjectInv(p.msg.reply_cache, client))
+  && (forall idx :: 0 <= idx < |ps.replicas| ==> ReplyCacheObjectInv(ps.replicas[idx].replica.executor.reply_cache, client))
 }
 
 lemma lemma_ReplyCacheStateInv(
@@ -72,7 +74,34 @@ lemma lemma_ReplyCacheStateInv(
       else
       {
         var ios :| RslNextOneReplica(ps, ps', idx, ios);
-        assert ReplyCacheObjectInv(cache', client);
+        if exists inp:LPacket<NodeIdentity, RslMessage> ::
+             && LIoOpReceive(inp) in ios
+             && inp.msg.RslMessage_AppStateSupply?
+             && inp.src in s.executor.constants.all.config.replica_ids
+             && LReplicaNextProcessAppStateSupply(s, s', inp, [])
+        {
+          var inp:LPacket<NodeIdentity, RslMessage> :|
+              && LIoOpReceive(inp) in ios
+              && inp.msg.RslMessage_AppStateSupply?
+              && inp.src in s.executor.constants.all.config.replica_ids
+              && LReplicaNextProcessAppStateSupply(s, s', inp, []);
+          lemma_PacketProcessedImpliesPacketSent(ps, ps', idx, ios, inp);
+          assert ReplyCacheObjectInv(inp.msg.reply_cache, client);
+          assert ReplyCacheObjectInv(cache', client);
+        }
+        else
+        {
+          assert ReplyCacheObjectInv(cache', client);
+        }
+      }
+    }
+
+    forall p | p in ps'.environment.sentPackets && p.src in ps.constants.config.replica_ids && p.msg.RslMessage_AppStateSupply?
+      ensures ReplyCacheObjectInv(p.msg.reply_cache, client)
+    {
+      if p !in ps.environment.sentPackets
+      {
+        var idx, ios := lemma_ActionThatSendsAppStateSupplyIsProcessAppStateRequest(ps, ps', p);
       }
     }
   }

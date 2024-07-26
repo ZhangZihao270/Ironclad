@@ -10,6 +10,7 @@ function Workaround_CastHostEnvironmentToObject(env:HostEnvironment) : object {e
 function Workaround_CastOkStateToObject(okState:OkState) : object {okState}
 function Workaround_CastNowStateToObject(nowState:NowState) : object {nowState}
 function Workaround_CastNetStateToObject(netState:NetState) : object {netState}
+function Workaround_CastIPEndPointToObject(ip:IPEndPoint) : object {ip}
 function Workaround_CastNetClientToObject(netc:NetClient?) : object? {netc}
 
 function HostEnvironmentDefaultFrame(env:HostEnvironment) : set<object>
@@ -47,9 +48,10 @@ predicate NetClientOk(netc:NetClient?)
   && netc.env.ok.ok()
 }
 
-function method EndPointIsValidPublicKey(endPoint:EndPoint) : bool
+function method EndPointIsValidIPV4(endPoint:EndPoint) : bool
 {
-  && |endPoint.public_key| < 0x10_0000 // < 1 MB
+  && |endPoint.addr| == 4
+  && 0 <= endPoint.port <= 65535
 }
 
 predicate NetClientIsValid(netc:NetClient?)
@@ -59,12 +61,12 @@ predicate NetClientIsValid(netc:NetClient?)
   && netc != null
   && netc.IsOpen()
   && HostEnvironmentIsValid(netc.env)
-  && EndPointIsValidPublicKey(EndPoint(netc.MyPublicKey()))
+  && EndPointIsValidIPV4(netc.LocalEndPoint())
 }
 
-predicate EndPointsAreValidPublicKeys(eps:seq<EndPoint>) 
+predicate EndPointsAreValidIPV4(eps:seq<EndPoint>) 
 {
-  forall i :: 0 <= i < |eps| ==> EndPointIsValidPublicKey(eps[i])
+  forall i :: 0 <= i < |eps| ==> EndPointIsValidIPV4(eps[i])
 }
 
 

@@ -75,14 +75,23 @@ predicate OnlySentMarshallableData(rawlog:seq<NetEvent>)
 
 datatype ReceiveResult = RRFail() | RRTimeout() | RRPacket(cpacket:CPacket)
 
+method GetEndPoint(ipe:IPEndPoint) returns (ep:EndPoint)
+    ensures ep == ipe.EP();
+    ensures EndPointIsValidIPV4(ep);
+{
+    var addr := ipe.GetAddress();
+    var port := ipe.GetPort();
+    ep := EndPoint(addr[..], port);
+}
+
 method Receive(netClient:NetClient, localAddr:EndPoint) returns (rr:ReceiveResult, ghost netEvent:NetEvent)
     requires NetClientIsValid(netClient);
-    requires EndPoint(netClient.MyPublicKey()) == localAddr;
+    requires netClient.LocalEndPoint() == localAddr;
     //requires KnownSendersMatchConfig(config);
     //requires SHTConcreteConfigurationIsValid(config);
     modifies NetClientRepr(netClient);
     ensures netClient.env == old(netClient.env);
-    ensures netClient.MyPublicKey() == old(netClient.MyPublicKey());
+    ensures netClient.LocalEndPoint() == old(netClient.LocalEndPoint());
     ensures NetClientOk(netClient) <==> !rr.RRFail?;
     ensures old(NetClientRepr(netClient)) == NetClientRepr(netClient);
     ensures !rr.RRFail? ==>
@@ -94,7 +103,7 @@ method Receive(netClient:NetClient, localAddr:EndPoint) returns (rr:ReceiveResul
            netEvent.LIoOpReceive?
         && NetPacketIsAbstractable(netEvent.r)
         && CPacketIsAbstractable(rr.cpacket)
-        && EndPointIsValidPublicKey(rr.cpacket.src)
+        && EndPointIsValidIPV4(rr.cpacket.src)
         && AbstractifyCPacketToShtPacket(rr.cpacket) == AbstractifyNetPacketToShtPacket(netEvent.r)
         && rr.cpacket.msg == SHTDemarshallData(netEvent.r.msg)
         && (rr.cpacket.dst == localAddr)
@@ -115,17 +124,17 @@ method Receive(netClient:NetClient, localAddr:EndPoint) returns (rr:ReceiveResul
         var start_time := Time.GetDebugTimeTicks();
         var cmessage := SHTDemarshallDataMethod(buffer);
         var end_time := Time.GetDebugTimeTicks();
-        var srcEp := EndPoint(remote);
+        var srcEp := GetEndPoint(remote);
         var cpacket := CPacket(localAddr, srcEp, cmessage);
         rr := RRPacket(cpacket);
-        netEvent := LIoOpReceive(LPacket(EndPoint(netClient.MyPublicKey()), srcEp, buffer[..]));
+        netEvent := LIoOpReceive(LPacket(netClient.LocalEndPoint(), remote.EP(), buffer[..]));
         forall ()
             ensures AbstractifyCPacketToShtPacket(rr.cpacket) == AbstractifyNetPacketToShtPacket(netEvent.r);
             //ensures SHTEndPointIsValid(rr.cpacket.src, config);
         {
 //            Uint64EndPointRelationships();
 //            assert ConvertEndPointToUint64(srcEp) == rr.cpacket.src;    // OBSERVE trigger
-            assert EndPointIsValidPublicKey(EndPoint(netClient.MyPublicKey()));  // OBSERVE trigger
+            assert EndPointIsValidIPV4(netClient.LocalEndPoint());  // OBSERVE trigger
         }
     }
 }
@@ -142,7 +151,7 @@ method ReadClock(netClient:NetClient) returns (clock:CBoundedClock, ghost clockE
     ensures clock.min as int <= clockEvent.time as int <= clock.max as int;
     ensures NetClientIsValid(netClient);
     ensures NetEventIsAbstractable(clockEvent);
-    ensures netClient.MyPublicKey() == old(netClient.MyPublicKey());
+    ensures netClient.LocalEndPoint() == old(netClient.LocalEndPoint());
     ensures clock.min==clock.max==clockEvent.time;  // silly
     // ensures clockEvent.ClockEvent(clock_min, clock_max);
     // TODO we're going to call GetTime, which returns a single value.
@@ -260,12 +269,12 @@ lemma lemma_NetEventLogAppend(broadcast:CBroadcast, netEventLog:seq<NetEvent>, n
 method SendBroadcast(netClient:NetClient, broadcast:CBroadcast, ghost localAddr_:EndPoint) returns (ok:bool, ghost netEventLog:seq<NetEvent>)
     requires NetClientIsValid(netClient);
     requires CBroadcastIsValid(broadcast);
-    requires EndPoint(netClient.MyPublicKey()) == localAddr_;
+    requires netClient.LocalEndPoint() == localAddr_;
     requires broadcast.CBroadcast? ==> broadcast.src == localAddr_;
     modifies NetClientRepr(netClient);
     ensures old(NetClientRepr(netClient)) == NetClientRepr(netClient);
     ensures netClient.env == old(netClient.env);
-    ensures netClient.MyPublicKey() == old(netClient.MyPublicKey());
+    ensures netClient.LocalEndPoint() == old(netClient.LocalEndPoint());
     ensures NetClientOk(netClient) <==> ok;
     ensures ok ==> (
            NetClientIsValid(netClient)
@@ -300,7 +309,7 @@ method SendBroadcast(netClient:NetClient, broadcast:CBroadcast, ghost localAddr_
             invariant |netEventLog| == i as int;
             invariant NetClientRepr(netClient) == old(NetClientRepr(netClient));
             invariant netClient.env == old(netClient.env);
-            invariant netClient.MyPublicKey() == old(netClient.MyPublicKey());
+            invariant netClient.LocalEndPoint() == old(netClient.LocalEndPoint());
             invariant NetClientIsValid(netClient);
             invariant NetClientOk(netClient);
             invariant old(netClient.env.net.history()) + netEventLog == netClient.env.net.history();
@@ -315,13 +324,13 @@ method SendBroadcast(netClient:NetClient, broadcast:CBroadcast, ghost localAddr_
             var dstEp:EndPoint := broadcast.dsts[i];
             var dstAddrAry := seqToArrayOpt(dstEp.addr);
             var remote;
-            ok, remote := CryptoEndPoint.Construct(dstAddrAry, dstEp.port, netClient.env);
+            ok, remote := IPEndPoint.Construct(dstAddrAry, dstEp.port, netClient.env);
             if (!ok) { return; }
 
             ok := netClient.Send(remote, buffer);
             if (!ok) { return; }
 
-            ghost var netEvent := NetSendEvent(NetPacket_ctor(remote.EP(), EndPoint(netClient.MyPublicKey()), buffer[..]));
+            ghost var netEvent := NetSendEvent(NetPacket_ctor(remote.EP(), netClient.LocalEndPoint(), buffer[..]));
             netEventLog := netEventLog + [netEvent];
 
             lemma_NetEventLogAppend(broadcast, netEventLog_old, netEvent);
@@ -337,12 +346,12 @@ method SendBroadcast(netClient:NetClient, broadcast:CBroadcast, ghost localAddr_
 method SendPacketSeq(netClient:NetClient, cpackets:seq<CPacket>, ghost localAddr_:EndPoint) returns (ok:bool, ghost netEventLog:seq<NetEvent>)
     requires NetClientIsValid(netClient);
     requires OutboundPacketsSeqIsValid(cpackets);
-    requires EndPoint(netClient.MyPublicKey()) == localAddr_;
+    requires netClient.LocalEndPoint() == localAddr_;
     requires OutboundPacketsSeqHasCorrectSrc(cpackets, localAddr_);
     modifies NetClientRepr(netClient);
     ensures old(NetClientRepr(netClient)) == NetClientRepr(netClient);
     ensures netClient.env == old(netClient.env);
-    ensures netClient.MyPublicKey() == old(netClient.MyPublicKey());
+    ensures netClient.LocalEndPoint() == old(netClient.LocalEndPoint());
     ensures NetClientOk(netClient) <==> ok;
     ensures ok ==> ( NetClientIsValid(netClient) && netClient.IsOpen());
     ensures ok ==> old(netClient.env.net.history()) + netEventLog == netClient.env.net.history();
@@ -359,7 +368,7 @@ method SendPacketSeq(netClient:NetClient, cpackets:seq<CPacket>, ghost localAddr
     while (i < |cpackets|)
         invariant old(NetClientRepr(netClient)) == NetClientRepr(netClient);
         invariant netClient.env == old(netClient.env);
-        invariant netClient.MyPublicKey() == old(netClient.MyPublicKey());
+        invariant netClient.LocalEndPoint() == old(netClient.LocalEndPoint());
         invariant NetClientOk(netClient) <==> ok;
         invariant ok ==> ( NetClientIsValid(netClient) && netClient.IsOpen());
         invariant ok ==> netClientEnvHistory_old + netEventLog == netClient.env.net.history();
@@ -376,6 +385,12 @@ method SendPacketSeq(netClient:NetClient, cpackets:seq<CPacket>, ghost localAddr
         assert cpacket in cpackets;
         assert OutboundPacketsIsValid(cpacket);
 
+
+        var dstAddrAry := seqToArrayOpt(dstEp.addr);
+        var remote;
+        ok, remote := IPEndPoint.Construct(dstAddrAry, dstEp.port, netClient.env);
+        if (!ok) { return; }
+
         assert CSingleMessageIsAbstractable(cpacket.msg);
          
         assert CSingleMessageMarshallable(cpacket.msg);
@@ -384,10 +399,10 @@ method SendPacketSeq(netClient:NetClient, cpackets:seq<CPacket>, ghost localAddr
         ghost var data := buffer[..];
         assert BufferRefinementAgreesWithMessageRefinement(cpacket.msg, data);
 
-        ok := netClient.Send(dstEp.public_key, buffer);
+        ok := netClient.Send(remote, buffer);
         if (!ok) { return; }
 
-        ghost var netEvent := LIoOpSend(LPacket(dstEp, EndPoint(netClient.MyPublicKey()), buffer[..]));
+        ghost var netEvent := LIoOpSend(LPacket(remote.EP(), netClient.LocalEndPoint(), buffer[..]));
         ghost var net := netEvent.s;
 
         calc {

@@ -14,10 +14,12 @@ import opened LiveRSL__Parameters_i
 import opened Concrete_NodeIdentity_i
 import opened Environment_s
 
+// aggregate states on all replicas
 datatype RslState = RslState(
   constants:LConstants,
   environment:LEnvironment<NodeIdentity, RslMessage>,
-  replicas:seq<LScheduler>
+  replicas:seq<LScheduler>,
+  clients:set<NodeIdentity>
   )
 
 predicate RslMapsComplete(ps:RslState)
@@ -28,6 +30,7 @@ predicate RslMapsComplete(ps:RslState)
 predicate RslConstantsUnchanged(ps:RslState, ps':RslState)
 {
   && |ps'.replicas| == |ps.replicas|
+  && ps'.clients == ps.clients
   && ps'.constants == ps.constants
 }
 
@@ -48,6 +51,8 @@ predicate RslNextCommon(ps:RslState, ps':RslState)
   && LEnvironment_Next(ps.environment, ps'.environment)
 }
 
+
+// one replica does an action
 predicate RslNextOneReplica(ps:RslState, ps':RslState, idx:int, ios:seq<RslIo>)
 {
   && RslNextCommon(ps, ps')
@@ -57,13 +62,16 @@ predicate RslNextOneReplica(ps:RslState, ps':RslState, idx:int, ios:seq<RslIo>)
   && ps'.replicas == ps.replicas[idx := ps'.replicas[idx]]
 }
 
+// send or receive a packet?
 predicate RslNextEnvironment(ps:RslState, ps':RslState)
+  ensures RslNextEnvironment(ps,ps')==>forall p :: p in ps'.environment.sentPackets ==> p in ps.environment.sentPackets
 {
   && RslNextCommon(ps, ps')
   && !ps.environment.nextStep.LEnvStepHostIos?
   && ps'.replicas == ps.replicas
 }
 
+// a replica send or receive a packet
 predicate RslNextOneExternal(ps:RslState, ps':RslState, eid:NodeIdentity, ios:seq<RslIo>)
 {
   && RslNextCommon(ps, ps')

@@ -7,7 +7,7 @@ import opened LiveRSL__DistributedSystem_i
 import opened LiveRSL__StateMachine_i
 import opened LiveRSL__Types_i
 import opened Collections__Seqs_s
-import opened AppStateMachine_s
+import opened AppStateMachine_i
 
 function GetAppStateFromRequestBatches(batches:seq<RequestBatch>):AppState
 {

@@ -11,16 +11,15 @@ module Host_i refines Host_s {
     import opened LiveSHT__Environment_i
     import opened LiveSHT__Scheduler_i
     import opened LiveSHT__SchedulerImpl_i
-    import opened LiveSHT__NetSHT_i
+    import opened LiveSHT__UdpSHT_i
     import opened LiveSHT__Unsendable_i
-    import opened CmdLineParser_i
     import opened ShtCmdLineParser_i 
     export Spec
         provides Native__Io_s, Environment_s, Native__NativeTypes_s
         provides HostState
         provides ConcreteConfiguration
-        provides HostInit, HostNext, ConcreteConfigInit, HostStateInvariants, ConcreteConfigToServers
-        provides ParseCommandLineConfiguration, ArbitraryObject
+        provides HostInit, HostNext, ConcreteConfigInit, HostStateInvariants, ConcreteConfigurationInvariants
+        provides ParseCommandLineConfiguration, ParseCommandLineId, ArbitraryObject
         provides HostInitImpl, HostNextImpl
     export All reveals *
 
@@ -29,6 +28,11 @@ module Host_i refines Host_s {
 
     type HostState = CScheduler
     type ConcreteConfiguration = ConstantsState
+
+    predicate ConcreteConfigurationInvariants(config:ConcreteConfiguration) 
+    {
+        ConstantsStateIsValid(config)
+    }
 
     predicate HostStateInvariants(host_state:HostState, env:HostEnvironment)
     {
@@ -52,43 +56,42 @@ module Host_i refines Host_s {
 
     predicate HostNext(host_state:HostState, host_state':HostState, ios:seq<LIoOp<EndPoint, seq<byte>>>)
     {
-           NetEventLogIsAbstractable(ios)
+           UdpEventLogIsAbstractable(ios)
         && OnlySentMarshallableData(ios)
         && (   LScheduler_Next(host_state.sched, host_state'.sched, AbstractifyRawLogToIos(ios))
             || HostNextIgnoreUnsendable(host_state.sched, host_state'.sched, ios))
     }
 
-    predicate ConcreteConfigInit(config:ConcreteConfiguration)
+    predicate ConcreteConfigInit(config:ConcreteConfiguration, servers:set<EndPoint>, clients:set<EndPoint>)
     {
         ConstantsStateIsValid(config)
      && config.rootIdentity in config.hostIds
      //&& (forall i :: 0 <= i < |config.hostIds| ==> c
+     && MapSeqToSet(config.hostIds, x=>x) == servers
+     && (forall e :: e in servers ==> EndPointIsAbstractable(e))
+     && (forall e :: e in clients ==> EndPointIsAbstractable(e))
     }
 
-    function ConcreteConfigToServers(config:ConcreteConfiguration) : set<EndPoint>
+    function ParseCommandLineConfiguration(args:seq<seq<uint16>>) : (ConcreteConfiguration, set<EndPoint>, set<EndPoint>)
     {
-      MapSeqToSet(config.hostIds, x=>x)
+        var sht_config := sht_config_parsing(args);
+        var endpoints_set := (set e{:trigger e in sht_config.hostIds} | e in sht_config.hostIds);
+        (sht_config, endpoints_set, {})
     }
 
-    function ParseCommandLineConfiguration(args:seq<seq<byte>>) : ConcreteConfiguration
+    function ParseCommandLineId(ip:seq<uint16>, port:seq<uint16>) : EndPoint
     {
-       sht_cmd_line_parsing(args)
+        sht_parse_id(ip, port)
     }
     
-    method {:timeLimitMultiplier 4} HostInitImpl(
-      ghost env:HostEnvironment,
-      netc:NetClient,
-      args:seq<seq<byte>>
-      ) returns (
-      ok:bool,
-      host_state:HostState
-      )
+    method {:timeLimitMultiplier 4} HostInitImpl(ghost env:HostEnvironment) returns (ok:bool, host_state:HostState, config:ConcreteConfiguration, ghost servers:set<EndPoint>, ghost clients:set<EndPoint>, id:EndPoint)
     {
-        var config:ConstantsState, my_index:uint64;
-        var id := EndPoint(netc.MyPublicKey());
-        ok, config, my_index := parse_cmd_line(id, args);
+        var init_config:ConstantsState, my_index;
+        ok, init_config, my_index := parse_cmd_line(env);
         if !ok { return; }
-        assert config.hostIds[my_index] in config.hostIds;
+        assert env.constants == old(env.constants);
+        id := init_config.hostIds[my_index];
+        config := init_config;
         
         var scheduler := new SchedulerImpl();
 //        calc {
@@ -99,22 +102,34 @@ module Host_i refines Host_s {
 
         assert env.Valid() && env.ok.ok();
         
-        ok := scheduler.Host_Init_Impl(config, my_index, id, netc, env);
+        ok := scheduler.Host_Init_Impl(config, id, env);
         
         if !ok { return; }
         host_state := CScheduler(scheduler.AbstractifyToLScheduler(), scheduler);
-        assert ConcreteConfigInit(config);
+        servers := set e | e in config.hostIds;
+        clients := {};
+        assert env.constants == old(env.constants);
+        ghost var args := env.constants.CommandLineArgs();
+        ghost var tuple := ParseCommandLineConfiguration(args[0..|args|-2]);
+        ghost var parsed_config, parsed_servers, parsed_clients := tuple.0, tuple.1, tuple.2;
+        //assert config.config == parsed_config.config;
+        assert config.params == parsed_config.params;
+        //assert config == parsed_config[me := parsed_config.hostIds[my_index]];
+        assert servers == parsed_servers; 
+        assert clients == parsed_clients;
+        assert ConcreteConfigInit(parsed_config, parsed_servers, parsed_clients);
         assert HostInit(host_state, config, id);
+        assert config == parsed_config && servers == parsed_servers && clients == parsed_clients && ConcreteConfigInit(parsed_config, parsed_servers, parsed_clients);
     }
     
-    predicate EventsConsistent(recvs:seq<NetEvent>, clocks:seq<NetEvent>, sends:seq<NetEvent>) 
+    predicate EventsConsistent(recvs:seq<UdpEvent>, clocks:seq<UdpEvent>, sends:seq<UdpEvent>) 
     {
         forall e :: (e in recvs  ==> e.LIoOpReceive?) 
                  && (e in clocks ==> e.LIoOpReadClock? || e.LIoOpTimeoutReceive?) 
                  && (e in sends  ==> e.LIoOpSend?)
     }
 
-    ghost method RemoveRecvs(events:seq<NetEvent>) returns (recvs:seq<NetEvent>, rest:seq<NetEvent>) 
+    ghost method RemoveRecvs(events:seq<UdpEvent>) returns (recvs:seq<UdpEvent>, rest:seq<UdpEvent>) 
         ensures forall e :: e in recvs ==> e.LIoOpReceive?;
         ensures events == recvs + rest;
         ensures rest != [] ==> !rest[0].LIoOpReceive?;
@@ -138,14 +153,14 @@ module Host_i refines Host_s {
         }
     }
 
-    predicate NetEventsReductionCompatible(events:seq<NetEvent>)
+    predicate UdpEventsReductionCompatible(events:seq<UdpEvent>)
     {
         forall i :: 0 <= i < |events| - 1 ==> events[i].LIoOpReceive? || events[i+1].LIoOpSend?
     }
 
 
-    lemma RemainingEventsAreSends(events:seq<NetEvent>)
-        requires NetEventsReductionCompatible(events);
+    lemma RemainingEventsAreSends(events:seq<UdpEvent>)
+        requires UdpEventsReductionCompatible(events);
         requires |events| > 0;
         requires !events[0].LIoOpReceive?;
         ensures  forall e :: e in events[1..] ==> e.LIoOpSend?;
@@ -157,8 +172,8 @@ module Host_i refines Host_s {
         }
     }
 
-    ghost method PartitionEvents(events:seq<NetEvent>) returns (recvs:seq<NetEvent>, clocks:seq<NetEvent>, sends:seq<NetEvent>)
-        requires NetEventsReductionCompatible(events);
+    ghost method PartitionEvents(events:seq<UdpEvent>) returns (recvs:seq<UdpEvent>, clocks:seq<UdpEvent>, sends:seq<UdpEvent>)
+        requires UdpEventsReductionCompatible(events);
         ensures  events == recvs + clocks + sends;
         ensures  EventsConsistent(recvs, clocks, sends);
         ensures  |clocks| <= 1;
@@ -185,22 +200,22 @@ module Host_i refines Host_s {
     {
     }*/
 
-    lemma NetEventsRespectReduction(s:LScheduler, s':LScheduler, 
-                                    ios:seq<LSHTIo>, events:seq<NetEvent>)
+    lemma UdpEventsRespectReduction(s:LScheduler, s':LScheduler, 
+                                    ios:seq<LSHTIo>, events:seq<UdpEvent>)
         requires LIoOpSeqCompatibleWithReduction(ios);
         requires RawIoConsistentWithSpecIO(events, ios);
-        ensures NetEventsReductionCompatible(events);
+        ensures UdpEventsReductionCompatible(events);
     {
         lemma_AbstractifyRawLogToIos_properties(events, ios);
-        assert NetEventsReductionCompatible(events);
+        assert UdpEventsReductionCompatible(events);
     }
 
     method {:timeLimitMultiplier 3} HostNextImpl(ghost env:HostEnvironment, host_state:HostState) 
         returns (ok:bool, host_state':HostState, 
-                 ghost recvs:seq<NetEvent>, ghost clocks:seq<NetEvent>, ghost sends:seq<NetEvent>, 
+                 ghost recvs:seq<UdpEvent>, ghost clocks:seq<UdpEvent>, ghost sends:seq<UdpEvent>, 
                  ghost ios:seq<LIoOp<EndPoint, seq<byte>>>)
     {
-        var okay, netEventLog, abstract_ios := host_state.scheduler_impl.Host_Next_main();
+        var okay, udpEventLog, abstract_ios := host_state.scheduler_impl.Host_Next_main();
         if okay {
 //            calc { 
 //                Q_LScheduler_Next(host_state.sched, host_state.replica_impl.AbstractifyToLScheduler(), abstract_ios);
@@ -208,16 +223,16 @@ module Host_i refines Host_s {
 //                LScheduler_Next(host_state.sched, host_state.replica_impl.AbstractifyToLScheduler(), abstract_ios);
 //            }
 
-            assert AbstractifyRawLogToIos(netEventLog) == abstract_ios;
+            assert AbstractifyRawLogToIos(udpEventLog) == abstract_ios;
             if LScheduler_Next(host_state.sched, host_state.scheduler_impl.AbstractifyToLScheduler(), abstract_ios)
             {
                 //ProtocolIosRespectReduction(host_state.sched, host_state.scheduler_impl.AbstractifyToLScheduler(), abstract_ios);
                 assert LIoOpSeqCompatibleWithReduction(abstract_ios);
             }
-            NetEventsRespectReduction(host_state.sched, host_state.scheduler_impl.AbstractifyToLScheduler(), abstract_ios, netEventLog);
-            recvs, clocks, sends := PartitionEvents(netEventLog);
+            UdpEventsRespectReduction(host_state.sched, host_state.scheduler_impl.AbstractifyToLScheduler(), abstract_ios, udpEventLog);
+            recvs, clocks, sends := PartitionEvents(udpEventLog);
             ios := recvs + clocks + sends; //abstract_ios;
-            assert ios == netEventLog;
+            assert ios == udpEventLog;
             host_state' := CScheduler(host_state.scheduler_impl.AbstractifyToLScheduler(), host_state.scheduler_impl);
         } else {
             recvs := [];
